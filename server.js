@@ -53,6 +53,7 @@ const PERM = require('./src/permissions');
   }
 })();
 
+const BUILD = '2026-09-09 19:29';   // بصمة النسخة — تظهر في /api/health
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
@@ -422,6 +423,23 @@ const RUN_DIRECTLY = require.main === module;
  * فتعرض المنصّة صفحة عامة لا تدل على شيء.
  */
 const handler = (req, res) => {
+  // فحص سريع لا يلمس قاعدة البيانات — يعمل حتى لو تعذّر الاتصال بها.
+  // يخبرك أي نسخة من الكود تعمل فعلاً على الاستضافة.
+  if (req.url === '/api/health' || req.url === '/api/health/') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.end(JSON.stringify({
+      ok: true,
+      build: BUILD,
+      node: process.version,
+      db_configured: !!process.env.DATABASE_URL,
+      db_mode: db.isRemote ? 'مستضافة' : 'محلية',
+      behind_proxy: process.env.BEHIND_PROXY === '1',
+      owner_password_set: !!process.env.OWNER_PASSWORD,
+    }, null, 2));
+  }
+
   ready().then(() => app(req, res)).catch((e) => {
     console.error('[فشل التهيئة]', e && e.stack || e);
     res.statusCode = 500;
