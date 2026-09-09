@@ -1,0 +1,6 @@
+data
+backups
+uploads
+*.log
+*.db
+.env

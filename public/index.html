@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نظام متابعة تحصيل السيارات</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f5ea8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="تحصيل السيارات">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<!-- ============ شاشة الدخول ============ -->
+<div id="login-screen" class="login-wrap hidden">
+  <form class="login-card" id="login-form">
+    <div class="login-logo">🚗</div>
+    <h1 id="login-title">نظام متابعة تحصيل السيارات</h1>
+    <p class="muted">سجّل الدخول للمتابعة</p>
+    <label>اسم المستخدم
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>كلمة المرور
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <div id="login-error" class="alert error hidden"></div>
+    <button class="btn primary block" type="submit">دخول</button>
+  </form>
+</div>
+
+<!-- شاشة تعذّر الوصول تُبنى وقت الحاجة فقط، ونصّها يأتي من الخادم -->
+<div id="notice-screen" class="login-wrap hidden"></div>
+
+<!-- ============ التطبيق ============ -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand"><span>🚗</span><b id="brand-name">نظام متابعة التحصيل</b></div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="dashboard" class="active">لوحة المؤشرات</button>
+      <button data-tab="cars">السيارات</button>
+      <button data-tab="performance" data-cap="reports.performance">أداء الموظفين</button>
+      <button data-tab="employees" data-cap="employees.view">الموظفون</button>
+      <button data-tab="salaries" data-cap="salaries.view">الرواتب</button>
+      <button data-tab="import" data-cap="cars.import">استيراد وتوزيع</button>
+      <button data-tab="permissions" data-cap="features.manage">الصلاحيات</button>
+      <button data-tab="settings" data-cap="settings.manage">الإعدادات</button>
+    </nav>
+    <div class="user-box">
+      <span id="user-name"></span>
+      <span class="badge" id="user-role"></span>
+      <button class="btn ghost sm hidden" id="btn-install">تثبيت كبرنامج</button>
+      <button class="btn ghost sm" id="btn-password">كلمة المرور</button>
+      <button class="btn ghost sm" id="btn-logout">خروج</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ---------- لوحة المؤشرات ---------- -->
+    <section id="tab-dashboard" class="tab-panel">
+      <div class="row between wrap">
+        <h2>لوحة المؤشرات</h2>
+        <div class="row gap">
+          <label class="inline">من <input type="date" id="dash-from"></label>
+          <label class="inline">إلى <input type="date" id="dash-to"></label>
+          <button class="btn" id="dash-refresh">تحديث</button>
+        </div>
+      </div>
+      <div class="cards" id="dash-cards"></div>
+      <div class="grid-2">
+        <div class="panel"><h3>يحتاج انتباهك</h3><div id="dash-attention"></div></div>
+        <div class="panel"><h3>حسب الحالة</h3><div id="dash-status"></div></div>
+      </div>
+      <div class="panel"><h3>نتائج التواصل خلال الفترة</h3><div id="dash-results"></div></div>
+    </section>
+
+    <!-- ---------- السيارات ---------- -->
+    <section id="tab-cars" class="tab-panel hidden">
+      <div class="row between wrap">
+        <h2>السيارات</h2>
+        <div class="row gap">
+          <button class="btn" id="btn-export" data-cap="reports.export">تصدير Excel</button>
+          <button class="btn primary" id="btn-add-car" data-cap="cars.add">+ إضافة سيارة</button>
+        </div>
+      </div>
+
+      <div class="filters">
+        <input id="f-q" placeholder="بحث: لوحة، سائق، جوال، هوية، عقد…" class="grow">
+        <select id="f-status"><option value="">كل الحالات</option></select>
+        <select id="f-type"><option value="">كل الأنواع</option></select>
+        <select id="f-emp" data-mgr><option value="">كل الموظفين</option><option value="none">غير مسندة</option></select>
+        <select id="f-quick">
+          <option value="">كل السيارات</option>
+          <option value="unpaid">عليها مبلغ متبقٍ</option>
+          <option value="never_contacted">لم يتم التواصل معها</option>
+          <option value="overdue_promise">تجاوزت موعد الوعد</option>
+          <option value="no_phone">بدون رقم تواصل</option>
+        </select>
+        <button class="btn" id="f-reset">مسح</button>
+      </div>
+
+      <div class="bulk hidden" id="bulk-bar">
+        <span id="bulk-count"></span>
+        <select id="bulk-emp"><option value="">— اختر موظفاً —</option></select>
+        <button class="btn primary sm" id="bulk-assign" data-cap="cars.assign">إسناد المحدد</button>
+        <button class="btn ghost sm" id="bulk-clear">إلغاء التحديد</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data" id="cars-table">
+          <thead><tr>
+            <th class="chk" data-cap="cars.assign"><input type="checkbox" id="chk-all"></th>
+            <th data-sort="plate">رقم اللوحة</th>
+            <th>النوع</th>
+            <th data-sort="driver">السائق</th>
+            <th>رقم التواصل</th>
+            <th data-sort="amount">المبلغ</th>
+            <th data-sort="remaining">المتبقي</th>
+            <th>الحالة</th>
+            <th data-sort="contacts">مرات التواصل</th>
+            <th data-sort="last">آخر تواصل</th>
+            <th data-sort="promise">موعد الوعد</th>
+            <th>الموظف</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="cars-body"></tbody>
+        </table>
+      </div>
+      <div class="row between wrap" id="cars-footer"></div>
+    </section>
+
+    <!-- ---------- أداء الموظفين ---------- -->
+    <section id="tab-performance" class="tab-panel hidden">
+      <div class="row between wrap">
+        <h2>أداء الموظفين</h2>
+        <div class="row gap">
+          <label class="inline">من <input type="date" id="perf-from"></label>
+          <label class="inline">إلى <input type="date" id="perf-to"></label>
+          <button class="btn" id="perf-refresh">تحديث</button>
+        </div>
+      </div>
+      <p class="muted" id="perf-note"></p>
+      <div class="table-wrap">
+        <table class="data" id="perf-table">
+          <thead><tr>
+            <th>#</th><th>الموظف</th><th>السيارات</th><th>لم تُمس</th>
+            <th>متابعات</th><th>سيارات تواصل معها</th><th>التغطية</th>
+            <th>نسبة الرد</th><th>وعود</th><th>حصّل بالفترة</th>
+            <th>إجمالي التحصيل</th><th>المتبقي عليه</th><th>مسددة</th><th>نقاط البونص</th>
+          </tr></thead>
+          <tbody id="perf-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ---------- الموظفون ---------- -->
+    <section id="tab-employees" class="tab-panel hidden">
+      <div class="row between wrap">
+        <h2>الموظفون</h2>
+        <div class="row gap">
+          <button class="btn" id="btn-distribute" data-cap="cars.assign">توزيع السيارات تلقائياً</button>
+          <button class="btn primary" id="btn-add-user" data-cap="employees.add">+ إضافة موظف</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr>
+            <th>رقم الموظف</th><th>الاسم</th><th>اسم المستخدم</th><th>الصلاحية</th>
+            <th>الجوال</th><th>سقف السيارات</th><th>السيارات الحالية</th><th>الحالة</th><th></th>
+          </tr></thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ---------- الصلاحيات (المفاتيح) ---------- -->
+    <section id="tab-permissions" class="tab-panel hidden">
+      <div class="row between wrap">
+        <h2>صلاحيات الأدوار</h2>
+        <button class="btn primary" id="perm-save" disabled>حفظ التغييرات</button>
+      </div>
+      <p class="muted">شغّل أو أطفئ أي صلاحية بضغطة — تسري فوراً على كل من يحمل الدور بدون إعادة تشغيل.</p>
+      <div id="perm-body"></div>
+    </section>
+
+    <!-- ---------- الرواتب ---------- -->
+    <section id="tab-salaries" class="tab-panel hidden">
+      <div class="tabbar" id="sal-tabs">
+        <button data-st="staff" class="active">رواتب الموظفين</button>
+        <button data-st="runs">المسيّرات الشهرية</button>
+      </div>
+      <div id="st-staff"></div>
+      <div id="st-runs" class="hidden"></div>
+    </section>
+
+    <!-- ---------- الاستيراد ---------- -->
+    <section id="tab-import" class="tab-panel hidden">
+      <h2>استيراد ملف السيارات</h2>
+      <div class="panel">
+        <p class="muted">ارفع ملف Excel أو CSV. النظام يتعرف على الأعمدة تلقائياً، ويكشف اللوحات المكررة والأرقام الناقصة قبل الاستيراد.</p>
+        <div class="row gap wrap">
+          <input type="file" id="imp-file" accept=".xlsx,.xlsm,.xls,.csv">
+          <button class="btn primary" id="imp-upload">فحص الملف</button>
+          <button class="btn ghost" id="imp-template">تحميل قالب جاهز</button>
+        </div>
+        <div id="imp-status"></div>
+      </div>
+      <div id="imp-preview" class="hidden"></div>
+      <div class="panel">
+        <h3>سجل عمليات الاستيراد</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>#</th><th>الملف</th><th>الصفوف</th><th>أُضيفت</th><th>حُدّثت</th><th>تجوهلت</th><th>بواسطة</th><th>التاريخ</th><th></th></tr></thead>
+            <tbody id="batches-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- الإعدادات ---------- -->
+    <section id="tab-settings" class="tab-panel hidden">
+      <h2>الإعدادات</h2>
+      <form class="panel form-grid" id="settings-form">
+        <label>اسم الشركة<input name="company_name"></label>
+        <label>السقف الافتراضي لعدد السيارات لكل موظف
+          <input name="default_max_cars" type="number" min="1">
+          <small class="muted">يُستخدم عند التوزيع التلقائي ما لم يُحدَّد سقف خاص للموظف.</small>
+        </label>
+        <label>هدف المتابعات الشهري (للبونص)<input name="bonus_target_contacts" type="number" min="1"></label>
+        <label>هدف التحصيل الشهري (للبونص)<input name="bonus_target_collection" type="number" min="1"></label>
+        <label>تُعتبر السيارة متأخرة عن المتابعة بعد (أيام)<input name="followup_gap_days" type="number" min="1"></label>
+        <label>العملة<input name="currency"></label>
+        <label style="grid-column:1/-1">مجلد النسخ الاحتياطية خارج الجهاز
+          <input name="backup_dir" placeholder="C:\Users\...\OneDrive\نسخ النظام">
+          <small class="muted">مجلد OneDrive أو Google Drive أو قرص خارجي. هذا وحده ينقذ بياناتك لو تلف القرص الصلب.</small>
+        </label>
+        <div><button class="btn primary" type="submit">حفظ الإعدادات</button></div>
+      </form>
+      <div class="panel">
+        <h3>قاعدة البيانات والنسخ الاحتياطي</h3>
+        <div id="db-status"></div>
+      </div>
+      <div class="panel">
+        <h3>سجل النشاط</h3>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>الوقت</th><th>المستخدم</th><th>الإجراء</th><th>التفاصيل</th></tr></thead>
+          <tbody id="audit-body"></tbody>
+        </table></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ النوافذ ============ -->
+<div class="modal-back hidden" id="modal-back">
+  <div class="modal" id="modal">
+    <div class="modal-head"><h3 id="modal-title"></h3><button class="x" id="modal-close">×</button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

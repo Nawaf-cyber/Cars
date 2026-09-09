@@ -1,0 +1,12 @@
+node_modules/
+data/
+backups/
+uploads/
+
+# كل ملفات البيئة سرّية — عدا القالب الفارغ
+.env
+.env.*
+!.env.example
+
+*.log
+*.db
