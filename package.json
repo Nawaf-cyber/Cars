@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check-db": "node \"فحص القاعدة.js\""
+    "check-db": "node \"فحص القاعدة.js\"",
+    "make-token": "node \"توليد توكن القاعدة.js\""
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

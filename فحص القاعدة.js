@@ -55,6 +55,30 @@ if (!TOKEN)
 else if (TOKEN.startsWith('libsql://'))
   problems.push('وضعت العنوان مكان التوكن — القيمتان معكوستان.');
 
+// فحص بنية التوكن قبل محاولة الاتصال — يوفّر تخميناً طويلاً
+if (TOKEN) {
+  const parts = TOKEN.split('.');
+  if (parts.length !== 3) {
+    problems.push('التوكن ناقص — يجب أن يتكوّن من ثلاثة أجزاء يفصلها نقطتان. غالباً نُسخ جزء منه.');
+  } else {
+    try {
+      const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+      if (!claims.a) {
+        problems.push(
+          'هذا توكن حساب (API Token) لا توكن قاعدة بيانات.\n' +
+          '       توكن القاعدة يحمل صلاحية "rw" — وهذا لا يحمل أي صلاحية.\n' +
+          '       أنشئه من: Turso ← اختر قاعدتك ← Create Token (أو: turso db tokens create اسم-القاعدة)');
+      } else if (claims.a === 'ro') {
+        problems.push('التوكن للقراءة فقط (ro) — النظام يحتاج قراءة وكتابة (rw).');
+      }
+      if (claims.exp && claims.exp * 1000 < Date.now())
+        problems.push('انتهت صلاحية التوكن بتاريخ ' + new Date(claims.exp * 1000).toISOString().slice(0, 10));
+    } catch {
+      problems.push('تعذّر قراءة محتوى التوكن — غالباً نُسخ ناقصاً.');
+    }
+  }
+}
+
 if (problems.length) {
   console.log('  ✗ مشاكل في القيم:\n');
   for (const p of problems) console.log('     • ' + p);

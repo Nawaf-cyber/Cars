@@ -12,6 +12,8 @@ const sql = require('./sql');
 
 const SCHEMA = require('./schema');   // مدمج في الكود — لا يُقرأ من القرص
 
+const EXPECTED_TABLES = (SCHEMA.match(/CREATE TABLE IF NOT EXISTS/g) || []).length;
+
 async function init() {
   if (!sql.isRemote) {
     // إعدادات تخص الملف المحلي فقط
@@ -20,6 +22,23 @@ async function init() {
     await sql.exec('PRAGMA wal_autocheckpoint = 64');  // ادمج كل ~256 كيلوبايت
   }
   await sql.exec('PRAGMA foreign_keys = ON');
+
+  /* على قاعدة مستضافة كل عبارة رحلة شبكة كاملة، وإنشاء المخطط يعني عشرات
+     الرحلات في كل بداية باردة. فحص واحد يخبرنا إن كان كل شيء جاهزاً أصلاً. */
+  const probe = await sql.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%') AS tables,
+      (SELECT sql FROM sqlite_master WHERE type='table' AND name='users') AS users_sql,
+      (SELECT sql FROM sqlite_master WHERE type='table' AND name='cars')  AS cars_sql
+  `).get();
+
+  const upToDate =
+    probe && probe.tables >= EXPECTED_TABLES &&
+    probe.users_sql && probe.users_sql.includes("'supervisor'") &&
+    probe.cars_sql && probe.cars_sql.includes('plate_letters');
+
+  if (upToDate) return;    // المخطط موجود ومحدّث — لا داعي لإعادة العمل
+
   await sql.exec(SCHEMA);
   await migrateRoles();
   await migrateCars();

@@ -92,6 +92,21 @@ app.use(express.static(path.join(__dirname, 'public'), {
   },
 }));
 
+// ---------- فحص سريع لا يلمس قاعدة البيانات ----------
+// مسجّل هنا أيضاً ليعمل في وضع الخادم المستقل لا في وضع الاستضافة فقط.
+app.get('/api/health', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    build: BUILD,
+    node: process.version,
+    db_configured: !!process.env.DATABASE_URL,
+    db_mode: db.isRemote ? 'مستضافة' : 'محلية',
+    behind_proxy: process.env.BEHIND_PROXY === '1',
+    owner_password_set: !!process.env.OWNER_PASSWORD,
+  });
+});
+
 // ---------- الثوابت التي تحتاجها الواجهة ----------
 app.get('/api/constants', (req, res) => {
   res.json({
