@@ -33,19 +33,24 @@ const PERM = require('./src/permissions');
    Express 4، فيبقى الطلب معلّقاً حتى ينتهي وقته. نلفّ كل معالج مرة واحدة هنا
    ليُمرَّر الخطأ إلى معالج الأخطاء ويصل المستخدم رد واضح. */
 (function catchAsyncRouteErrors() {
-  const Layer = require('express/lib/router/layer');
-  const orig = Layer.prototype.handle_request;
-  Layer.prototype.handle_request = function (req, res, next) {
-    const fn = this.handle;
-    if (fn && fn.length <= 3) {
-      try {
-        const out = fn.call(this, req, res, next);
-        if (out && typeof out.catch === 'function') out.catch(next);
-        return;
-      } catch (e) { return next(e); }
-    }
-    return orig.call(this, req, res, next);
-  };
+  try {
+    const Layer = require('express/lib/router/layer');
+    const orig = Layer.prototype.handle_request;
+    Layer.prototype.handle_request = function (req, res, next) {
+      const fn = this.handle;
+      if (fn && fn.length <= 3) {
+        try {
+          const out = fn.call(this, req, res, next);
+          if (out && typeof out.catch === 'function') out.catch(next);
+          return;
+        } catch (e) { return next(e); }
+      }
+      return orig.call(this, req, res, next);
+    };
+  } catch (e) {
+    // مسار داخلي في express قد يتغيّر بين الإصدارات — لا نُسقط النظام لأجله
+    console.warn('[تحذير] تعذّر تفعيل التقاط أخطاء المسارات:', e.message);
+  }
 })();
 
 const app = express();

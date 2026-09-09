@@ -1,5 +1,4 @@
 'use strict';
-const { createClient } = require('@libsql/client');
 const path = require('path');
 const fs = require('fs');
 
@@ -32,6 +31,19 @@ const IS_REMOTE = !URL.startsWith('file:');
 
 // مسار الملف الفعلي — يتبع DATABASE_URL إن كان ملفاً، وإلا لا معنى له (قاعدة مستضافة)
 const DB_FILE = IS_REMOTE ? null : path.resolve(URL.slice('file:'.length));
+
+/**
+ * مدخلان مختلفان لسبب مهم:
+ *   web  : جافاسكربت خالص يتكلم عبر HTTP — لا ملفات ثنائية أصلية.
+ *   الرئيسي : يحمّل مكتبة SQLite الأصلية للقراءة من ملف على القرص.
+ *
+ * الملف الأصلي مبنيّ لنظام الجهاز الذي ثُبّتت عليه الحزمة (ويندوز هنا)،
+ * فلو حُمِّل على استضافة لينكس فشل تحميل الوحدة كلها وسقط النظام قبل أن يبدأ.
+ * لذلك لا نلمس المدخل الرئيسي إلا عند العمل على ملف محلي فعلاً.
+ */
+const createClient = IS_REMOTE
+  ? require('@libsql/client/web').createClient
+  : require('@libsql/client').createClient;
 
 const client = createClient(
   IS_REMOTE ? { url: URL, authToken: TOKEN } : { url: URL }
