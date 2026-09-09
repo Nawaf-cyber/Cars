@@ -1,11 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "regions": ["bom1"],
+
   "functions": {
     "api/index.js": {
       "includeFiles": "{public,private,src}/**"
     }
   },
+
   "rewrites": [
+    { "source": "/", "destination": "/index.html" },
     { "source": "/(.*)", "destination": "/api" }
   ]
 }
