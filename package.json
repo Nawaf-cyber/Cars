@@ -20,5 +20,12 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@libsql/linux-x64-gnu": "*",
+    "@libsql/linux-arm64-gnu": "*",
+    "@libsql/darwin-x64": "*",
+    "@libsql/darwin-arm64": "*",
+    "@libsql/win32-x64-msvc": "*"
   }
 }

@@ -10,7 +10,7 @@ const sql = require('./sql');
    يجب استدعاء init() مرة واحدة قبل تشغيل الخادم.
    ============================================================================= */
 
-const SCHEMA = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+const SCHEMA = require('./schema');   // مدمج في الكود — لا يُقرأ من القرص
 
 async function init() {
   if (!sql.isRemote) {
@@ -151,7 +151,15 @@ async function exportToFile(targetPath) {
   }
 
   fs.rmSync(targetPath, { force: true });
-  const { createClient } = require('@libsql/client');
+
+  // كتابة ملف SQLite تحتاج المكتبة الأصلية. إن غابت على الاستضافة
+  // نخبر المستخدم بوضوح بدل أن يسقط الطلب بلا سبب مفهوم.
+  let createClient;
+  try {
+    ({ createClient } = require('@libsql/client'));
+  } catch (e) {
+    throw new Error('تعذّر تجهيز ملف النسخة على هذه الاستضافة: ' + e.message);
+  }
   const out = createClient({ url: 'file:' + targetPath.replace(/\\/g, '/') });
 
   try {

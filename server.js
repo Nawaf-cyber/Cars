@@ -409,21 +409,35 @@ function banner(created, backup) {
 }
 
 /* ---------- طريقتا التشغيل ----------
-   خادم مستقل (جهازك أو VPS أو Docker): يستمع على منفذ.
-   استضافة بلا حالة (Vercel): لا يوجد منفذ — تُصدَّر دالة تعالج كل طلب،
-   ونضمن اكتمال التهيئة قبل أول طلب في كل بداية باردة. */
-const IS_SERVERLESS = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+   خادم مستقل (`node server.js`): يستمع على منفذ.
+   استضافة بلا حالة: الملف يُستورَد لا يُشغَّل، فنصدّر دالة تعالج كل طلب.
 
-if (IS_SERVERLESS) {
-  module.exports = (req, res) => {
-    ready().then(() => app(req, res)).catch((e) => {
-      console.error('[فشل التهيئة]', e);
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.end(JSON.stringify({ error: 'تعذّر تشغيل النظام — راجع إعدادات قاعدة البيانات' }));
-    });
-  };
-} else {
+   المعيار هو require.main: عند `node server.js` يساوي الوحدة نفسها،
+   وعند الاستيراد لا يساويها. أدق من الاعتماد على متغيّر بيئة قد لا يوجد. */
+const RUN_DIRECTLY = require.main === module;
+
+/**
+ * معالج الطلبات على الاستضافة.
+ * يلتقط أي فشل في التهيئة ويرسله كرسالة مقروءة — بدل أن تسقط الدالة
+ * فتعرض المنصّة صفحة عامة لا تدل على شيء.
+ */
+const handler = (req, res) => {
+  ready().then(() => app(req, res)).catch((e) => {
+    console.error('[فشل التهيئة]', e && e.stack || e);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({
+      error: 'تعذّر تشغيل النظام',
+      سبب: String(e && e.message || e),
+      تحقق_من: ['DATABASE_URL', 'DATABASE_TOKEN', 'OWNER_PASSWORD'],
+    }, null, 2));
+  });
+};
+
+module.exports = handler;
+module.exports.default = handler;   // بعض المنصّات تبحث عن default
+
+if (RUN_DIRECTLY) {
   start().catch((e) => {
     console.error('\n[فشل الإقلاع]', e.message);
     console.error(e.stack);
