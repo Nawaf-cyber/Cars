@@ -164,11 +164,24 @@ router.get('/performance/:id', P.needs('reports.performance'), async (req, res) 
 });
 
 // ================= سجل النشاط =================
+/**
+ * سجل النشاط — كلٌّ يرى من هم في رتبته فأدنى، لا أعلى.
+ *
+ * بدون هذا القيد تتسرّب الطبقة العليا من هنا: المالك مخفيّ من قائمة
+ * المستخدمين لكن كل فعل يقوم به كان يظهر للمدير باسمه. القاعدة نفسها
+ * تحمي مشرف النظام من نائبه، ونائب المدير من الموظف.
+ */
 router.get('/audit', P.needs('reports.audit'), async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
+  const myRank = P.RANK[req.user.role] ?? -1;
+  const visible = Object.keys(P.RANK).filter((r) => P.RANK[r] <= myRank);
+
   const rows = (await db.prepare(`
-    SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id=a.user_id
-    ORDER BY a.id DESC LIMIT ?`).all(limit));
+    SELECT a.*, u.name AS user_name
+    FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+    WHERE u.id IS NULL OR u.role IN (${visible.map(() => '?').join(',')})
+    ORDER BY a.id DESC LIMIT ?`).all(...visible, limit));
+
   res.json({ log: rows });
 });
 
