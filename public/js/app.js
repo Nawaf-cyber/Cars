@@ -1363,7 +1363,7 @@ function renderPreview(d) {
       </div>
     </div>
 
-    <div class="panel">
+    ${cap('cars.assign') ? `    <div class="panel">
       <h3>إسناد السيارات للموظفين</h3>
       <label class="check"><input type="radio" name="am" value="column" ${hasEmpCol ? 'checked' : ''} ${hasEmpCol ? '' : 'disabled'}>
         حسب عمود "اسم الموظف" في الملف ${hasEmpCol ? '' : '<span class="muted">— لا يوجد عمود موظف في هذا الملف</span>'}</label>
@@ -1392,7 +1392,11 @@ function renderPreview(d) {
             </div>`).join('')}
         </div>` : ''}
     </div>
-
+` : `
+    <div class="panel">
+      <h3>إسناد السيارات</h3>
+      <div class="alert info">ستُسنَد كل سيارات الملف إليك وتظهر في قائمتك.</div>
+    </div>`}
     <div class="panel">
       <h3>عند وجود لوحة مسجّلة مسبقاً</h3>
       <label class="check"><input type="radio" name="dup" value="skip" checked> تجاهل الصف (لا تغيّر شيئاً)</label>
@@ -1421,9 +1425,10 @@ function renderPreview(d) {
     $$('#map-grid select').forEach((s2) => { if (s2.value !== '') mapping[s2.dataset.field] = +s2.value; });
     if (mapping.plate === undefined) return toast('حدّد عمود رقم اللوحة', 'bad');
 
-    const mode = $('input[name=am]:checked').value;
+    // حقول الإسناد لا تُعرض لمن لا يوزّع — والخادم يُسند له سياراته تلقائياً
+    const mode = $('input[name=am]:checked')?.value || 'single';
     const empMap = {};
-    $$('#emp-map select').forEach((s2) => { if (s2.value) empMap[s2.dataset.empname] = +s2.value; });
+    $('#emp-map select').forEach((s2) => { if (s2.value) empMap[s2.dataset.empname] = +s2.value; });
 
     const btn = $('#imp-commit');
     btn.disabled = true;
@@ -1434,8 +1439,8 @@ function renderPreview(d) {
         body: {
           token: d.token, sheet: d.sheet, header_row: d.header_row, filename: d.filename,
           mapping, assign_mode: mode,
-          single_employee_id: $('#am-single').value,
-          per_employee: $('#am-per').value,
+          single_employee_id: $('#am-single')?.value || '',
+          per_employee: $('#am-per')?.value || '',
           employee_map: empMap,
           on_duplicate: $('input[name=dup]:checked').value,
         },

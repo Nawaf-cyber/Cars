@@ -245,12 +245,23 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
     return res.status(400).json({ error: 'يجب تحديد عمود رقم اللوحة' });
 
   const onDuplicate = b.on_duplicate === 'update' ? 'update' : 'skip';
-  const assignMode = ['column', 'single', 'auto', 'none'].includes(b.assign_mode) ? b.assign_mode : 'auto';
-  const singleEmployee = b.single_employee_id ? parseInt(b.single_employee_id, 10) : null;
+
+  /* من لا يملك حق الإسناد يستورد لنفسه وحده — أياً كان ما أرسله.
+     بدون هذا يستطيع موظف أن يوزّع ملفاً على زملائه، أو يترك السيارات
+     بلا إسناد فتختفي عنه لحظة استيرادها كما حدث مع الإضافة اليدوية. */
+  const canAssign = P.can(req.user, 'cars.assign');
+  const assignMode = canAssign
+    ? (['column', 'single', 'auto', 'none'].includes(b.assign_mode) ? b.assign_mode : 'auto')
+    : 'single';
+  const singleEmployee = canAssign
+    ? (b.single_employee_id ? parseInt(b.single_employee_id, 10) : null)
+    : req.user.id;
   const employeeMap = b.employee_map && typeof b.employee_map === 'object' ? b.employee_map : {};
   const perEmployee = b.per_employee === '' || b.per_employee == null ? null : parseInt(b.per_employee, 10);
 
-  const employees = (await db.prepare("SELECT id, name, emp_code, max_cars FROM users WHERE active=1 AND role='employee' ORDER BY name").all());
+  const employees = canAssign
+    ? (await db.prepare("SELECT id, name, emp_code, max_cars FROM users WHERE active=1 AND role='employee' ORDER BY name").all())
+    : (await db.prepare('SELECT id, name, emp_code, max_cars FROM users WHERE id = ?').all(req.user.id));
   if (assignMode === 'auto' && !employees.length)
     return res.status(400).json({ error: 'لا يوجد موظفون نشطون للتوزيع — أضف موظفين أولاً أو اختر "بدون إسناد"' });
   if (assignMode === 'single' && !singleEmployee)
@@ -421,12 +432,18 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
 });
 
 // سجل عمليات الاستيراد
+// كلٌّ يرى عمليات استيراده. من يرى كل السيارات يرى كل العمليات.
 router.get('/batches', P.needs('cars.import'), async (req, res) => {
+  const all = P.can(req.user, 'cars.view_all');
+  const params = [];
+  let where = '1=1';
+  if (!all) { where = 'b.created_by = ?'; params.push(req.user.id); }
+
   const rows = (await db.prepare(`
     SELECT b.*, u.name AS created_by_name,
            (SELECT COUNT(*) FROM cars c WHERE c.batch_id = b.id) AS cars_now
     FROM import_batches b LEFT JOIN users u ON u.id = b.created_by
-    ORDER BY b.id DESC LIMIT 50`).all());
+    WHERE ${where} ORDER BY b.id DESC LIMIT 50`).all(...params));
   res.json({ batches: rows });
 });
 

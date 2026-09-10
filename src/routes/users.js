@@ -40,12 +40,24 @@ router.get('/', P.needs('employees.view'), async (req, res) => {
 });
 
 // قائمة مختصرة للموظفين النشطين (لقوائم الإسناد والتوزيع)
+/**
+ * قائمة الموظفين — تملأ قوائم الإسناد والتصفية.
+ *
+ * من لا يملك حق الإسناد لا يحتاج أسماء زملائه: صفحته خاصة به، وكشف
+ * الأسماء وعدد سيارات كلٍّ منهم بيانات لا علاقة له بها. يحصل على نفسه
+ * وحده فتبقى القوائم تعمل بلا فراغ.
+ */
 router.get('/employees', A.requireAuth, async (req, res) => {
+  const all = P.can(req.user, 'cars.assign');
+  const params = [];
+  let where = "active = 1 AND role IN ('employee','deputy')";
+  if (!all) { where += ' AND id = ?'; params.push(req.user.id); }
+
   const rows = (await db.prepare(`
     SELECT id, emp_code, name, max_cars,
            (SELECT COUNT(*) FROM cars c WHERE c.assigned_to = users.id) AS cars_count
-    FROM users WHERE active = 1 AND role IN ('employee','deputy') ORDER BY name`).all());
-  res.json({ employees: rows });
+    FROM users WHERE ${where} ORDER BY name`).all(...params));
+  res.json({ employees: rows, scoped: !all });
 });
 
 router.post('/', P.needs('employees.add'), async (req, res) => {
