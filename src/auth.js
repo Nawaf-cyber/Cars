@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
+const U = require('./util');
 
 const SESSION_DAYS = 7;
 
@@ -147,9 +148,11 @@ function requireOwner(req, res, next) {
  * فنبتلع أي خطأ هنا حتى لا يُسقط طلباً ناجحاً بسبب سطر تدقيق.
  */
 function audit(userId, action, entity, entityId, details) {
-  return db.prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?,?,?,?,?)')
+  // الوقت صراحةً لا من افتراضي الجدول — انظر U.now()
+  return db.prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, details, created_at) VALUES (?,?,?,?,?,?)')
     .run(userId ?? null, action, entity ?? null, entityId ?? null,
-         details == null ? null : (typeof details === 'string' ? details : JSON.stringify(details)))
+         details == null ? null : (typeof details === 'string' ? details : JSON.stringify(details)),
+         U.now())
     .catch((e) => console.error('[تحذير] تعذّر كتابة سجل النشاط:', e.message));
 }
 

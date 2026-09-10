@@ -3,7 +3,8 @@
 /* التوقيت — يجب أن يُضبط قبل أول استعمال لأي تاريخ في العملية كلها.
    الاستضافة تعمل بتوقيت UTC، فكل حساب تاريخ في جافاسكربت كان يتأخر ثلاث
    ساعات، ويقفز يوماً كاملاً إلى الوراء بعد التاسعة مساءً بتوقيتنا. */
-process.env.TZ = process.env.TZ || 'Asia/Riyadh';
+// APP_TZ لا TZ: الاستضافة تضبط TZ=UTC بنفسها، فلو احترمناها بقي الخطأ.
+process.env.TZ = process.env.APP_TZ || 'Asia/Riyadh';
 
 /* يقرأ ملف .env إن وُجد (للتشغيل المحلي).
    على الاستضافات تأتي المتغيّرات من لوحة التحكم فلا يوجد ملف — وهذا طبيعي. */
@@ -112,6 +113,8 @@ app.get('/api/health', (req, res) => {
     db_mode: db.isRemote ? 'مستضافة' : 'محلية',
     behind_proxy: process.env.BEHIND_PROXY === '1',
     owner_password_set: !!process.env.OWNER_PASSWORD,
+    tz: process.env.TZ,
+    now: new Date().toLocaleString('sv-SE'),
   });
 });
 
@@ -481,6 +484,8 @@ const handler = (req, res) => {
       db_mode: db.isRemote ? 'مستضافة' : 'محلية',
       behind_proxy: process.env.BEHIND_PROXY === '1',
       owner_password_set: !!process.env.OWNER_PASSWORD,
+      tz: process.env.TZ,
+      now: new Date().toLocaleString('sv-SE'),
     }, null, 2));
   }
 

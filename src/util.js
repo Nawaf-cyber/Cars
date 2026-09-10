@@ -135,6 +135,20 @@ const CHARGE_KINDS = [
 const CHARGE_STATUSES = ['متأخر', 'مرسل', 'تم الدفع'];
 
 // ---------- التواريخ ----------
+/**
+ * الوقت الآن بصيغة القاعدة "YYYY-MM-DD HH:MM:SS".
+ *
+ * نمرّره صراحةً في كل إدراج بدل الاعتماد على DEFAULT الجدول: القيمة
+ * الافتراضية تُحسب على خادم القاعدة (خارج السعودية)، و"CREATE TABLE IF NOT
+ * EXISTS" لا يعدّل جدولاً موجوداً — فتصحيح المخطط وحده لا يصلح قاعدة تعمل.
+ */
+function now() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function today() {
   return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD بالتوقيت المحلي
 }
@@ -166,5 +180,5 @@ module.exports = {
   PLATE_LETTERS, normalizePhone, toNumber, money,
   RESULT_CODES, RESULT_MAP, CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
   CHARGE_KINDS, CHARGE_STATUSES,
-  today, isValidDate, parseDate,
+  today, now, isValidDate, parseDate,
 };

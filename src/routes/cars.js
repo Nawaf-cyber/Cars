@@ -188,8 +188,9 @@ router.post('/', P.needs('cars.add'), async (req, res) => {
   const info = (await db.prepare(`
     INSERT INTO cars (plate, plate_key, plate_letters, plate_digits, car_type, driver_name, driver_phone, driver_id_no,
                       contract_no, contract_start, contract_months, installment_amount, contract_value,
-                      installments_paid, total_amount, status, assigned_to, added_by, source, notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+                      installments_paid, total_amount, status, assigned_to, added_by, source, notes,
+                      created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     plate, key, p.letters.join(''), p.digits, carType,
     String(b.driver_name || '').trim() || null,
     phoneInfo.phone || null,
@@ -203,7 +204,8 @@ router.post('/', P.needs('cars.add'), async (req, res) => {
     U.money(b.total_amount),
     U.CAR_STATUSES.includes(b.status) ? b.status : 'مفتوح',
     assignedTo, req.user.id, 'يدوي',
-    String(b.notes || '').trim() || null
+    String(b.notes || '').trim() || null,
+    U.now(), U.now()
   ));
 
   const id = Number(info.lastInsertRowid);
@@ -381,8 +383,8 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   const reached = b.reached === undefined ? rc.reached : (b.reached ? 1 : 0);
 
   const info = (await db.prepare(`
-    INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, promise_date, channel)
-    VALUES (?,?,?,?,?,?,?)`).run(id, req.user.id, reached, rc.code, note || null, promise, channel));
+    INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, promise_date, channel, created_at)
+    VALUES (?,?,?,?,?,?,?,?)`).run(id, req.user.id, reached, rc.code, note || null, promise, channel, U.now()));
 
   // تحديث حالة السيارة تبعاً للنتيجة
   let status = car.status;

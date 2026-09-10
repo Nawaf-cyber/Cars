@@ -318,8 +318,8 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
         total_amount=?, assigned_to=COALESCE(?,assigned_to), updated_at=datetime('now','+3 hours')
       WHERE id=?`);
     const insertNote = tx.prepare(`
-      INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, channel)
-      VALUES (?,?,0,'أخرى',?,'اتصال')`);
+      INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, channel, created_at)
+      VALUES (?,?,0,'أخرى',?,'اتصال',?)`);
     for (let i = 0; i < dataRows.length; i++) {
       const r = dataRows[i];
       const rowNo = headerIdx + 2 + i;
@@ -390,7 +390,7 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
         amount, 'مفتوح', assignedTo, req.user.id, batchId, null
       );
       // نقل "النتيجة" القديمة من الإكسل كأول متابعة مؤرَّخة حتى لا تضيع
-      if (resultText) await insertNote.run(Number(info.lastInsertRowid), req.user.id, 'مُرحَّل من الإكسل: ' + resultText);
+      if (resultText) await insertNote.run(Number(info.lastInsertRowid), req.user.id, 'مُرحَّل من الإكسل: ' + resultText, U.now());
       inserted++;
       countAssigned();
     }
