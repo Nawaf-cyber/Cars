@@ -69,7 +69,16 @@ async function api(path, opts = {}) {
     o.headers['Content-Type'] = 'application/json';
     o.body = JSON.stringify(o.body);
   }
-  const r = await fetch('/api' + path, o);
+  // fetch يفشل قبل أن يصل الخادم أصلاً: نت مقطوع، أو الخادم متوقف.
+  // المتصفح يرمي "Failed to fetch" بالإنجليزية فلا يفهم الموظف ما عليه فعله.
+  let r;
+  try {
+    r = await fetch('/api' + path, o);
+  } catch {
+    throw new Error(navigator.onLine
+      ? 'تعذّر الوصول إلى الخادم — تأكد أن النظام يعمل ثم أعد المحاولة'
+      : 'لا يوجد اتصال بالإنترنت — تحقّق من الشبكة');
+  }
   if (r.status === 401 && S.user) { S.user = null; showLogin(); throw new Error('انتهت الجلسة — سجّل الدخول مرة أخرى'); }
   const ct = r.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
