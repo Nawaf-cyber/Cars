@@ -71,7 +71,7 @@ async function migrateRoles() {
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
     `);
-    console.log('[ترقية] تم توسيع الأدوار: مشرف النظام ونائب المدير.');
+    console.log('[ترقية] تم توسيع الأدوار: مشرف الموظفين ومشرف القسم.');
   } finally {
     await sql.exec('PRAGMA legacy_alter_table = OFF');
     await sql.exec('PRAGMA foreign_keys = ON');

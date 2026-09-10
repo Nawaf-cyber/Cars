@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS license_payments (
 );
 
 -- ---------- الصلاحيات كمفاتيح تُشغَّل وتُطفَأ ----------
--- بدل تثبيت صلاحيات كل دور في الكود، تُخزَّن هنا ويغيّرها مشرف النظام بضغطة.
+-- بدل تثبيت صلاحيات كل دور في الكود، تُخزَّن هنا ويغيّرها مشرف الموظفين بضغطة.
 CREATE TABLE IF NOT EXISTS role_permissions (
   role       TEXT NOT NULL,
   capability TEXT NOT NULL,

@@ -169,7 +169,7 @@ router.get('/performance/:id', P.needs('reports.performance'), async (req, res) 
  *
  * بدون هذا القيد تتسرّب الطبقة العليا من هنا: المالك مخفيّ من قائمة
  * المستخدمين لكن كل فعل يقوم به كان يظهر للمدير باسمه. القاعدة نفسها
- * تحمي مشرف النظام من نائبه، ونائب المدير من الموظف.
+ * تحمي مشرف الموظفين من مشرف قسمه، ومشرف القسم من الموظف.
  */
 router.get('/audit', P.needs('reports.audit'), async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);

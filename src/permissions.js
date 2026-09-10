@@ -6,7 +6,7 @@ const cache = require('./cache');
    الصلاحيات كمفاتيح
    ---------------------------------------------------------------------------
    بدل تثبيت ما يقدر عليه كل دور داخل الكود، نعرّف قائمة "قدرات" ثابتة،
-   ونخزّن لكل دور أي القدرات مشغّلة. مشرف النظام يغيّرها بضغطة دون برمجة.
+   ونخزّن لكل دور أي القدرات مشغّلة. مشرف الموظفين يغيّرها بضغطة دون برمجة.
 
    ثلاث بوابات يمر بها أي طلب:
      1) هل الدور يملك القدرة؟        (role_permissions)
@@ -18,9 +18,9 @@ const ROLES = ['owner', 'supervisor', 'manager', 'deputy', 'employee'];
 
 const ROLE_LABEL = {
   owner: 'مالك النظام',
-  supervisor: 'مشرف النظام',
+  supervisor: 'مشرف موظفين',
   manager: 'مدير الشركة',
-  deputy: 'نائب المدير',
+  deputy: 'مشرف قسم',
   employee: 'موظف',
 };
 
@@ -82,7 +82,7 @@ const CAPABILITIES = [
 const CAP_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 const PLAN_CAPS = new Set(CAPABILITIES.filter((c) => c.plan).map((c) => c.key));
 
-/** الإعدادات الافتراضية عند أول تشغيل — يعدّلها مشرف النظام بعدها كما يشاء. */
+/** الإعدادات الافتراضية عند أول تشغيل — يعدّلها مشرف الموظفين بعدها كما يشاء. */
 const DEFAULTS = {
   supervisor: [
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',
@@ -104,7 +104,7 @@ const DEFAULTS = {
     'salaries.view', 'salaries.manage',
     'settings.manage',
   ],
-  // نائب المدير: يراقب بالكامل ولا يعدّل — نقطة البداية، ويضبطها مشرف النظام
+  // مشرف القسم: يراقب بالكامل ولا يعدّل — نقطة البداية، ويضبطها مشرف الموظفين
   deputy: [
     'cars.view_all', 'cars.edit_contact',
     'followups.create', 'payments.create',
@@ -183,7 +183,7 @@ function needs(capability) {
   };
 }
 
-/** تعديل مفاتيح دور — يستخدمه مشرف النظام. */
+/** تعديل مفاتيح دور — يستخدمه مشرف الموظفين. */
 async function setRolePermissions(role, changes, actorRole) {
   if (!CLIENT_ROLES.includes(role)) throw new Error('دور غير معروف');
   // لا أحد يعدّل صلاحيات دوره أو دور أعلى منه
