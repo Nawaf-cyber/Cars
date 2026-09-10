@@ -1,6 +1,5 @@
 'use strict';
 const express = require('express');
-const XLSX = require('xlsx');
 const db = require('../db');
 const A = require('../auth');
 const U = require('../util');
@@ -236,19 +235,12 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
 
 // قالب استيراد جاهز بالأعمدة الصحيحة
 router.get('/export/template', P.needs('cars.import'), async (req, res) => {
-  const sample = [{
-    'رقم اللوحة': 'أ ص س 7220', 'نوعها': 'نقل عام', 'اسم السائق': 'محمد طارق',
-    'رقم التواصل': '0581499842', 'رقم الهوية': '2412345678', 'الموظف': 'محمد الحجيلي',
-    'رقم العقد': 'C-1001', 'بداية العقد': '2024-01-15', 'مدة العقد': 48,
-    'القسط الشهري': 1500, 'قيمة العقد': 72000, 'إجمالي المبلغ': 52701, 'النتيجة': '',
-  }];
-  const ws = XLSX.utils.json_to_sheet(sample);
-  ws['!cols'] = Object.keys(sample[0]).map(() => ({ wch: 16 }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'قالب الاستيراد');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = await require('../excel').buildTemplate();
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="import-template.xlsx"');
+  res.setHeader('Content-Disposition',
+    'attachment; filename="import-template.xlsx"; filename*=UTF-8' +
+    String.fromCharCode(39) + String.fromCharCode(39) +
+    encodeURIComponent('قالب الاستيراد.xlsx'));
   res.send(buf);
 });
 

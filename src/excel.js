@@ -124,4 +124,78 @@ async function buildCollectionFile(byEmployee) {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-module.exports = { buildCollectionFile, COLUMNS, needsAttention };
+
+/* ---------------------------------------------------------------------------
+   قالب الاستيراد
+   ---------------------------------------------------------------------------
+   نفس أعمدة كشف الشركة بالضبط، زائد عمود "الموظف" الذي يقرأه التوزيع
+   التلقائي فيسند كل سيارة لصاحبها بلا عمل يدوي.
+
+   الشكل مطابق لملف التحصيل عمداً: من يملأ القالب يراه كما سيراه بعد
+   الاستيراد، فلا يتفاجأ. وصفّا المثال يُحذفان قبل الرفع — مكتوب في الورقة.
+   --------------------------------------------------------------------------- */
+const TEMPLATE_COLUMNS = [
+  { header: 'رقم اللوحة',   width: 16, hint: 'أ ص س 7220' },
+  { header: 'نوعها',        width: 12, hint: 'نقل عام' },
+  { header: 'اسم السائق',   width: 20, hint: 'محمد طارق' },
+  { header: 'رقم التواصل',  width: 15, hint: '0581499842' },
+  { header: 'إجمالي المبلغ', width: 14, hint: '52701' },
+  { header: 'النتيجة',      width: 45, hint: 'تم التواصل وسيتم مراجعة الشركة' },
+  { header: 'الموظف',       width: 18, hint: 'محمد الحجيلي' },
+];
+
+async function buildTemplate() {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'نظام متابعة تحصيل السيارات';
+
+  const ws = wb.addWorksheet('قالب الاستيراد', {
+    views: [{ rightToLeft: true, state: 'frozen', ySplit: 2 }],
+  });
+  ws.columns = TEMPLATE_COLUMNS.map((c, i) => ({ key: 'c' + i, width: c.width }));
+
+  const note = ws.addRow(['املأ الصفوف تحت العناوين ثم احذف صفّي المثال — رقم اللوحة وحده إلزامي']);
+  ws.mergeCells(1, 1, 1, TEMPLATE_COLUMNS.length);
+  note.height = 24;
+  const nc = note.getCell(1);
+  nc.fill = fill(GREEN_DARK);
+  nc.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+  nc.alignment = { horizontal: 'center', vertical: 'middle' };
+  nc.border = BOX;
+
+  const head = ws.addRow(TEMPLATE_COLUMNS.map((c) => c.header));
+  head.height = 22;
+  head.eachCell((cell) => {
+    cell.fill = fill(GREEN_DARK);
+    cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = BOX;
+  });
+
+  // صفّا مثال: أحدهما كامل والآخر بالحد الأدنى، ليتضح ما هو إلزامي
+  const samples = [
+    TEMPLATE_COLUMNS.map((c) => c.hint),
+    ['أ ط س 5142', 'نقل عام', 'سامي خان', '0570964740', 8040, '', ''],
+  ];
+  for (const vals of samples) {
+    const row = ws.addRow(vals);
+    row.height = 20;
+    row.eachCell((cell, col) => {
+      cell.fill = fill(GREEN_LIGHT);
+      cell.border = BOX;
+      cell.font = { italic: true, color: { argb: 'FF6B7B5E' } };
+      cell.alignment = { horizontal: col === 6 ? 'right' : 'center', vertical: 'middle',
+                         wrapText: col === 6, readingOrder: 'rtl' };
+    });
+  }
+
+  // صفوف فارغة جاهزة للتعبئة بنفس الحدود، فلا يبدو الملف ناقصاً
+  for (let i = 0; i < 20; i++) {
+    const row = ws.addRow(TEMPLATE_COLUMNS.map(() => null));
+    row.height = 20;
+    row.eachCell({ includeEmpty: true }, (cell) => { cell.border = BOX; });
+  }
+
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+module.exports = { buildCollectionFile, buildTemplate, COLUMNS, TEMPLATE_COLUMNS, needsAttention };
