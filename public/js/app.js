@@ -368,14 +368,15 @@ function carsQuery() {
 
 async function loadCars() {
   const tb = $('#cars-body');
-  tb.innerHTML = '<tr><td colspan="13" class="empty"><span class="spin"></span> جارٍ التحميل…</td></tr>';
+  tb.innerHTML = '<tr><td colspan="14" class="empty"><span class="spin"></span> جارٍ التحميل…</td></tr>';
   let d;
   try { d = await api('/cars?' + carsQuery()); }
-  catch (e) { tb.innerHTML = `<tr><td colspan="13" class="empty">${esc(e.message)}</td></tr>`; return; }
+  catch (e) { tb.innerHTML = `<tr><td colspan="14" class="empty">${esc(e.message)}</td></tr>`; return; }
 
   Object.assign(S.cars, { total: d.total, pages: d.pages });
   const canAssign = cap('cars.assign');
-  const cols = canAssign ? 13 : 12;
+  const showArrears = cap('charges.view');
+  const cols = 12 + (canAssign ? 1 : 0) + (showArrears ? 1 : 0);
 
   if (!d.cars.length) {
     tb.innerHTML = `<tr><td colspan="${cols}" class="empty">لا توجد سيارات مطابقة</td></tr>`;
@@ -393,6 +394,9 @@ async function loadCars() {
             : '<span class="badge bad">لا يوجد</span>'}</td>
         <td class="num">${num(c.total_amount)}</td>
         <td class="num"><b class="${c.remaining > 0 ? '' : 'muted'}">${num(c.remaining)}</b></td>
+        ${showArrears ? `<td class="num">${c.arrears_total > 0
+            ? `<b style="color:var(--bad)">${num(c.arrears_total)}</b><br><small class="muted">${num(c.arrears_count)} مطالبة</small>`
+            : '<span class="muted">—</span>'}</td>` : ''}
         <td>${statusBadge(c.status)}</td>
         <td class="num">${c.contact_count > 0
             ? `<span class="badge info">${num(c.contact_count)}</span>`
@@ -480,8 +484,10 @@ function renderCar(b, d) {
     <div class="detail-grid">
       ${dcell('نوع السيارة', esc(c.car_type))}
       ${dcell('رقم التواصل', c.driver_phone ? `<a href="tel:${esc(c.driver_phone)}">${esc(c.driver_phone)}</a>` : '<span class="badge bad">لا يوجد</span>')}
-      ${dcell('رقم الهوية', esc(c.driver_id_no || '—'))}
       ${dcell('إجمالي المستحق', num(c.total_amount))}
+      ${cap('charges.view') ? dcell('إجمالي المتأخرات',
+        `<span style="color:${c.arrears_total > 0 ? 'var(--bad)' : 'var(--ok)'}">${num(c.arrears_total)}</span>` +
+        (c.arrears_count ? ` <span class="muted">(${num(c.arrears_count)} مطالبة)</span>` : '')) : ''}
       ${dcell('المسدد', `<span style="color:var(--ok)">${num(c.paid_amount)}</span>`)}
       ${dcell('المتبقي', `<span style="color:${c.remaining > 0 ? 'var(--bad)' : 'var(--ok)'}">${num(c.remaining)}</span>`)}
       ${dcell('مرات التواصل', num(c.contact_count))}
@@ -489,9 +495,6 @@ function renderCar(b, d) {
       ${dcell('موعد الوعد', c.promise_date ? `<span class="badge ${late ? 'bad' : 'warn'}">${dOnly(c.promise_date)}${late ? ' — متجاوز' : ''}</span>` : '—')}
       ${dcell('الموظف المسؤول', esc(c.assigned_name || 'غير مسندة'))}
       ${dcell('أضافها', esc(c.added_by_name || '—') + (c.source === 'استيراد' ? ' (استيراد)' : ''))}
-      ${c.contract_no ? dcell('رقم العقد', esc(c.contract_no)) : ''}
-      ${c.installment_amount ? dcell('القسط الشهري', num(c.installment_amount)) : ''}
-      ${c.contract_months ? dcell('الأقساط', `${num(c.installments_paid)} من ${num(c.contract_months)}`) : ''}
     </div>
     <div class="bar ${progress >= 100 ? 'ok' : progress > 50 ? '' : 'warn'}" style="margin-bottom:1rem">
       <i style="width:${progress}%"></i>
@@ -500,16 +503,18 @@ function renderCar(b, d) {
     <div class="tabbar" id="car-tabs">
       <button data-ct="follow" class="active">المتابعات (${d.follow_ups.length})</button>
       <button data-ct="pay">الدفعات (${d.payments.length})</button>
+      ${cap('charges.view') ? `<button data-ct="charge">المتأخرات (${d.charges.length})</button>` : ''}
       <button data-ct="edit">تعديل البيانات</button>
     </div>
     <div id="ct-follow"></div>
     <div id="ct-pay" class="hidden"></div>
+    <div id="ct-charge" class="hidden"></div>
     <div id="ct-edit" class="hidden"></div>`;
 
   $('#car-tabs', b).onclick = (e) => {
     const t = e.target.closest('button'); if (!t) return;
     $$('#car-tabs button', b).forEach((x) => x.classList.toggle('active', x === t));
-    ['follow', 'pay', 'edit'].forEach((k) => $('#ct-' + k, b).classList.toggle('hidden', k !== t.dataset.ct));
+    ['follow', 'pay', 'charge', 'edit'].forEach((k) => $('#ct-' + k, b).classList.toggle('hidden', k !== t.dataset.ct));
   };
 
   /* ----- تبويب المتابعات ----- */
@@ -602,6 +607,10 @@ function renderCar(b, d) {
       catch (e) { toast(e.message, 'bad'); }
     }));
 
+  /* ----- تبويب المتأخرات ----- */
+  // ما كان الموظف يقرأه من برنامج آخر أثناء المكالمة، صار هنا أمامه
+  if (cap('charges.view')) renderCharges(b, c, d.charges);
+
   /* ----- تبويب التعديل ----- */
   $('#ct-edit', b).innerHTML = carForm(c, cap('cars.edit')) + (cap('cars.delete')
     ? `<div class="modal-actions"><button class="btn danger" id="car-del">حذف السيارة نهائياً</button></div>` : '');
@@ -611,6 +620,123 @@ function renderCar(b, d) {
     try { await api('/cars/' + c.id, { method: 'DELETE' }); closeModal(); toast('تم الحذف', 'ok'); loadCars(); }
     catch (e) { toast(e.message, 'bad'); }
   });
+}
+
+/* ---------------- المتأخرات ---------------- */
+// ثلاث حالات بثلاثة ألوان — يقرأها الموظف بنظرة وهو على الهاتف
+const CHARGE_CLASS = { 'متأخر': 'bad', 'مرسل': 'warn', 'تم الدفع': 'ok' };
+
+function chargeRows(list, canSettle, canEdit, canDel) {
+  if (!list.length)
+    return `<tr><td colspan="${canSettle || canEdit || canDel ? 7 : 6}" class="empty">لا توجد مطالبات على هذه السيارة</td></tr>`;
+
+  return list.map((h) => `<tr>
+    <td>${dOnly(h.issued_at)}</td>
+    <td>${esc(h.invoice_no || '—')}</td>
+    <td>${esc(h.description)}<div class="muted" style="font-size:.8em">${esc(h.kind)}${
+      h.source !== 'يدوي' ? ' · ' + esc(h.source) : ''}</div></td>
+    <td class="num"><b>${num(h.amount)}</b></td>
+    <td><span class="badge ${CHARGE_CLASS[h.status] || ''}">${esc(h.status)}</span></td>
+    <td>${h.paid_at ? dOnly(h.paid_at) : '—'}</td>
+    ${canSettle || canEdit || canDel ? `<td style="white-space:nowrap">
+      ${canSettle && h.status !== 'تم الدفع'
+        ? `<button class="btn sm ok" data-settle="${h.id}">تم السداد</button>` : ''}
+      ${canSettle && h.status === 'متأخر'
+        ? `<button class="btn sm" data-send="${h.id}">مرسل</button>` : ''}
+      ${canSettle && h.status === 'تم الدفع'
+        ? `<button class="btn sm" data-unsettle="${h.id}">تراجع</button>` : ''}
+      ${canEdit ? `<button class="btn sm" data-editch="${h.id}">تعديل</button>` : ''}
+      ${canDel ? `<button class="btn sm danger" data-delch="${h.id}">حذف</button>` : ''}
+    </td>` : ''}
+  </tr>`).join('');
+}
+
+function chargeForm(h = {}) {
+  const v = (k, dflt = '') => esc(h[k] ?? dflt);
+  return `<form id="charge-form">
+    <div class="form-grid">
+      <label>التاريخ<input name="issued_at" type="date" value="${v('issued_at', todayISO())}"></label>
+      <label>رقم الفاتورة<input name="invoice_no" value="${v('invoice_no')}" placeholder="INV-013458"></label>
+      <label>النوع<select name="kind">${S.consts.charge_kinds.map((k) =>
+        `<option ${h.kind === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      <label>المبلغ *<input name="amount" type="number" step="0.01" min="0.01" value="${v('amount')}" required></label>
+      <label>الحالة<select name="status">${S.consts.charge_statuses.map((k) =>
+        `<option ${h.status === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      <label>تاريخ السداد<input name="paid_at" type="date" value="${v('paid_at')}"></label>
+    </div>
+    <label>الوصف *<input name="description" value="${v('description')}" required
+      placeholder="مثال: مخالفة مواقف خاطئة"></label>
+    <label>ملاحظة<input name="note" value="${v('note')}"></label>
+    <div class="modal-actions"><button class="btn primary">${h.id ? 'حفظ التعديلات' : 'إضافة المطالبة'}</button></div>
+  </form>`;
+}
+
+function renderCharges(b, c, list) {
+  const canSettle = cap('charges.settle');
+  const canEdit = cap('charges.edit');
+  const canDel = cap('charges.delete');
+  const canAdd = cap('charges.create');
+
+  const due = list.filter((h) => h.status !== 'تم الدفع').reduce((a, h) => a + h.amount, 0);
+  const settled = list.filter((h) => h.status === 'تم الدفع').reduce((a, h) => a + h.amount, 0);
+  const sent = list.filter((h) => h.status === 'مرسل').reduce((a, h) => a + h.amount, 0);
+
+  $('#ct-charge', b).innerHTML = `
+    <div class="detail-grid" style="margin-bottom:1rem">
+      ${dcell('إجمالي المتأخرات', `<span style="color:${due > 0 ? 'var(--bad)' : 'var(--ok)'}">${num(due)}</span>`)}
+      ${dcell('منها مُرسَل', num(sent))}
+      ${dcell('تم الدفع', `<span style="color:var(--ok)">${num(settled)}</span>`)}
+    </div>
+    ${canAdd ? '<button class="btn primary" id="ch-add" style="margin-bottom:1rem">+ إضافة مطالبة</button>' : ''}
+    <div class="table-wrap"><table class="data">
+      <thead><tr>
+        <th>التاريخ</th><th>رقم الفاتورة</th><th>الوصف</th><th>المبلغ</th>
+        <th>الحالة</th><th>تاريخ السداد</th>${canSettle || canEdit || canDel ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>${chargeRows(list, canSettle, canEdit, canDel)}</tbody>
+    </table></div>`;
+
+  const reload = () => { openCar(c.id); loadCars(); };
+
+  // تغيير الحالة — الأمر الذي يستعمله الموظف عشرات المرات يومياً
+  const setStatus = (id, status) => async () => {
+    try {
+      await api(`/cars/charges/${id}/status`, { method: 'POST', body: { status } });
+      toast(status === 'تم الدفع' ? 'سُجّل السداد' : `الحالة الآن: ${status}`, 'ok');
+      reload();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  $$('#ct-charge [data-settle]', b).forEach((x) => x.onclick = setStatus(x.dataset.settle, 'تم الدفع'));
+  $$('#ct-charge [data-send]', b).forEach((x) => x.onclick = setStatus(x.dataset.send, 'مرسل'));
+  $$('#ct-charge [data-unsettle]', b).forEach((x) => x.onclick = setStatus(x.dataset.unsettle, 'متأخر'));
+
+  const bindForm = (box, id) => {
+    const f = $('#charge-form', box);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = Object.fromEntries(new FormData(e.target));
+      try {
+        await api(id ? `/cars/charges/${id}` : `/cars/${c.id}/charges`,
+          { method: id ? 'PUT' : 'POST', body: fd });
+        toast(id ? 'تم حفظ التعديلات' : 'أُضيفت المطالبة', 'ok');
+        closeModal(); reload();
+      } catch (ex) { toast(ex.message, 'bad'); }
+    };
+  };
+
+  const add = $('#ch-add', b);
+  if (add) add.onclick = () => bindForm(openModal('إضافة مطالبة', chargeForm()), null);
+
+  $$('#ct-charge [data-editch]', b).forEach((x) => x.onclick = () => {
+    const h = list.find((z) => z.id === Number(x.dataset.editch));
+    bindForm(openModal('تعديل المطالبة', chargeForm(h)), h.id);
+  });
+
+  $$('#ct-charge [data-delch]', b).forEach((x) => x.onclick = () =>
+    confirmBox('حذف هذه المطالبة نهائياً؟', async () => {
+      try { await api('/cars/charges/' + x.dataset.delch, { method: 'DELETE' }); reload(); }
+      catch (e) { toast(e.message, 'bad'); }
+    }));
 }
 
 function dcell(k, v) { return `<div class="d"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`; }
@@ -721,12 +847,11 @@ function carForm(c = {}, mgr = false) {
 
   // الموظف: بيانات التواصل فقط — بقية الحقول للعرض وللمدير التعديل
   if (!mgr) {
-    return `<div class="alert info">تعدّل بيانات التواصل فقط. رقم اللوحة والمبلغ والعقد يعدّلها المدير.</div>
+    return `<div class="alert info">تعدّل بيانات التواصل فقط. رقم اللوحة والمبلغ يعدّلهما المدير.</div>
     <form id="car-form">
       <div class="form-grid">
         <label>اسم السائق<input name="driver_name" value="${v('driver_name')}"></label>
         <label>رقم التواصل<input name="driver_phone" value="${v('driver_phone')}" placeholder="05XXXXXXXX"></label>
-        <label>رقم الهوية / الإقامة<input name="driver_id_no" value="${v('driver_id_no')}"></label>
       </div>
       <label>ملاحظات<textarea name="notes">${v('notes')}</textarea></label>
       <div class="modal-actions"><button class="btn primary">حفظ التعديلات</button></div>
@@ -740,7 +865,6 @@ function carForm(c = {}, mgr = false) {
         `<option ${c.car_type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
       <label>اسم السائق<input name="driver_name" value="${v('driver_name')}"></label>
       <label>رقم التواصل<input name="driver_phone" value="${v('driver_phone')}" placeholder="05XXXXXXXX"></label>
-      <label>رقم الهوية / الإقامة<input name="driver_id_no" value="${v('driver_id_no')}"></label>
       <label>إجمالي المبلغ المستحق
         <input name="total_amount" type="number" step="0.01" min="0" value="${v('total_amount', 0)}"></label>
       <label>الحالة<select name="status">${S.consts.car_statuses.map((s) =>
@@ -749,13 +873,6 @@ function carForm(c = {}, mgr = false) {
         <option value="">— غير مسندة —</option>
         ${S.employees.map((e) => `<option value="${e.id}" ${c.assigned_to === e.id ? 'selected' : ''}>${esc(e.name)} (${e.cars_count})</option>`).join('')}
       </select></label>
-      <label>رقم العقد<input name="contract_no" value="${v('contract_no')}"></label>
-      <label>بداية العقد<input name="contract_start" type="date" value="${v('contract_start')}"></label>
-      <label>مدة العقد (شهر)<input name="contract_months" type="number" min="1" value="${v('contract_months')}"></label>
-      <label>القسط الشهري<input name="installment_amount" type="number" step="0.01" min="0" value="${v('installment_amount')}"></label>
-      <label>قيمة العقد<input name="contract_value" type="number" step="0.01" min="0" value="${v('contract_value')}"></label>
-      ${c.id ? `<label class="check" style="align-self:end;margin-bottom:1rem">
-        <input type="checkbox" name="ownership_transferred" ${c.ownership_transferred ? 'checked' : ''}> تم نقل الملكية للسائق</label>` : ''}
     </div>
     <label>ملاحظات<textarea name="notes">${v('notes')}</textarea></label>
     <div class="modal-actions"><button class="btn primary">${c.id ? 'حفظ التعديلات' : 'إضافة السيارة'}</button></div>
@@ -770,7 +887,6 @@ function bindCarForm(form, id, after) {
     if (plate && !plate.validate()) { plate.focusFirstEmpty(); return toast('أكمل رقم اللوحة بشكل صحيح', 'bad'); }
     const fd = Object.fromEntries(new FormData(e.target));
     if (plate) Object.assign(fd, plate.values());
-    fd.ownership_transferred = !!e.target.ownership_transferred?.checked;
     try {
       const r = id
         ? await api('/cars/' + id, { method: 'PUT', body: fd })
@@ -1031,12 +1147,11 @@ $('#imp-upload').onclick = async () => {
   } catch (e) { $('#imp-status').innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
 };
 
+// نفس أعمدة كشف الشركة تماماً — لا نعرض حقلاً لا يوجد في ملفهم
 const FIELD_LABELS = {
   plate: 'رقم اللوحة *', car_type: 'نوع السيارة', driver_name: 'اسم السائق',
-  driver_phone: 'رقم التواصل', total_amount: 'إجمالي المبلغ', driver_id_no: 'رقم الهوية',
-  employee: 'اسم الموظف', result: 'النتيجة / الملاحظات', contract_no: 'رقم العقد',
-  contract_start: 'بداية العقد', contract_months: 'مدة العقد', installment_amount: 'القسط الشهري',
-  contract_value: 'قيمة العقد',
+  driver_phone: 'رقم التواصل', total_amount: 'إجمالي المبلغ',
+  employee: 'اسم الموظف', result: 'النتيجة / الملاحظات',
 };
 
 function renderPreview(d) {

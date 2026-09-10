@@ -126,6 +126,14 @@ const CAR_STATUSES = ['مفتوح', 'قيد المتابعة', 'وعد بالس�
 const PAY_METHODS = ['نقدي', 'تحويل', 'شبكة', 'شيك'];
 const CHANNELS = ['اتصال', 'واتساب', 'رسالة', 'زيارة'];
 
+// ---------- المتأخرات ----------
+// أنواع المطالبات كما تظهر في كشوف الشركة: مخالفة مواقف، رسوم خدمة، أمانة…
+const CHARGE_KINDS = [
+  'مخالفة مواقف', 'مخالفة مرورية', 'غرامة', 'رسوم خدمة', 'أمانة', 'بدل', 'أخرى',
+];
+// متأخر: مستحق ولم يُدفع · مرسل: أُرسلت للسائق وننتظر · تم الدفع: سُدّدت
+const CHARGE_STATUSES = ['متأخر', 'مرسل', 'تم الدفع'];
+
 // ---------- التواريخ ----------
 function today() {
   return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD بالتوقيت المحلي
@@ -157,5 +165,6 @@ module.exports = {
   toEnglishDigits, normalizePlate, formatPlate, parsePlate, normalizeLetters,
   PLATE_LETTERS, normalizePhone, toNumber, money,
   RESULT_CODES, RESULT_MAP, CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
+  CHARGE_KINDS, CHARGE_STATUSES,
   today, isValidDate, parseDate,
 };

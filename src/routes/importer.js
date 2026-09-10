@@ -50,12 +50,6 @@ const FIELD_ALIASES = {
   total_amount:       ['اجمالي المبلغ', 'إجمالي المبلغ', 'المبلغ', 'المتأخرات', 'المستحق', 'amount', 'total'],
   result:             ['النتيجه', 'النتيجة', 'الملاحظات', 'ملاحظات', 'result', 'note'],
   employee:           ['الموظف', 'اسم الموظف', 'المسؤول', 'المحصل', 'employee'],
-  driver_id_no:       ['الهوية', 'رقم الهوية', 'الاقامة', 'الإقامة', 'رقم الاقامة', 'id'],
-  contract_no:        ['رقم العقد', 'العقد', 'contract'],
-  contract_start:     ['بداية العقد', 'تاريخ العقد', 'تاريخ البداية', 'start'],
-  contract_months:    ['مدة العقد', 'عدد الاقساط', 'عدد الأقساط', 'months'],
-  installment_amount: ['القسط', 'قيمة القسط', 'القسط الشهري', 'installment'],
-  contract_value:     ['قيمة العقد', 'اجمالي العقد', 'إجمالي العقد'],
 };
 
 function normHeader(s) {

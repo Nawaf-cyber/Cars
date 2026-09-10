@@ -15,6 +15,9 @@ const CAR_SELECT = `
          ab.name AS added_by_name,
          IFNULL(p.paid, 0)                       AS paid_amount,
          ROUND(c.total_amount - IFNULL(p.paid,0), 2) AS remaining,
+         IFNULL(ch.due, 0)                       AS arrears_total,
+         IFNULL(ch.settled, 0)                   AS arrears_paid,
+         IFNULL(ch.open_cnt, 0)                  AS arrears_count,
          IFNULL(f.cnt, 0)                        AS contact_count,
          f.last_at                               AS last_contact_at,
          (SELECT result_code  FROM follow_ups WHERE car_id=c.id ORDER BY id DESC LIMIT 1) AS last_result,
@@ -25,6 +28,11 @@ const CAR_SELECT = `
   LEFT JOIN users u  ON u.id  = c.assigned_to
   LEFT JOIN (SELECT car_id, SUM(amount) paid FROM payments GROUP BY car_id) p ON p.car_id = c.id
   LEFT JOIN (SELECT car_id, COUNT(*) cnt, MAX(created_at) last_at FROM follow_ups GROUP BY car_id) f ON f.car_id = c.id
+  LEFT JOIN (SELECT car_id,
+               SUM(CASE WHEN status <> 'تم الدفع' THEN amount ELSE 0 END) due,
+               SUM(CASE WHEN status =  'تم الدفع' THEN amount ELSE 0 END) settled,
+               SUM(CASE WHEN status <> 'تم الدفع' THEN 1 ELSE 0 END)      open_cnt
+             FROM charges GROUP BY car_id) ch ON ch.car_id = c.id
 `;
 
 // الموظف يرى سياراته فقط؛ المدير يرى الكل
@@ -139,7 +147,15 @@ router.get('/:id', A.requireAuth, async (req, res) => {
     FROM payments p LEFT JOIN users u ON u.id = p.created_by
     WHERE p.car_id = ? ORDER BY p.paid_at DESC, p.id DESC`).all(id));
 
-  res.json({ car, follow_ups: followUps, payments });
+  // المتأخرات: الأحدث أولاً، وغير المسدّد قبل المسدّد
+  const charges = P.can(req.user, 'charges.view') ? (await db.prepare(`
+    SELECT ch.*, u.name AS created_by_name
+    FROM charges ch LEFT JOIN users u ON u.id = ch.created_by
+    WHERE ch.car_id = ?
+    ORDER BY CASE ch.status WHEN 'متأخر' THEN 0 WHEN 'مرسل' THEN 1 ELSE 2 END,
+             ch.issued_at DESC, ch.id DESC`).all(id)) : [];
+
+  res.json({ car, follow_ups: followUps, payments, charges });
 });
 
 // ================= إضافة سيارة (المدير فقط) =================
@@ -437,6 +453,130 @@ router.delete('/payments/:pid', P.needs('payments.delete'), async (req, res) => 
   (await db.prepare('DELETE FROM payments WHERE id=?').run(pid));
   await refreshStatus(p.car_id);
   A.audit(req.user.id, 'حذف دفعة', 'cars', p.car_id, { amount: p.amount });
+  res.json({ ok: true });
+});
+
+
+/* =============================================================================
+   المتأخرات — مطالبات السائق سطراً سطراً
+   ---------------------------------------------------------------------------
+   قسّمنا الصلاحية عمداً: الموظف الذي يتصل بالسائق يحتاج أن يسجّل "تم الدفع"
+   وهو على الهاتف، لكنه لا يخلق مطالبات ولا يغيّر مبالغها — تلك تأتي من
+   كشوف الشركة أو من البرامج المربوطة.
+   ============================================================================= */
+
+/** يجلب المطالبة ومعها سيارتها، ويتحقق أن هذا المستخدم يملك حق لمسها. */
+async function chargeOf(req, res) {
+  const cid = parseInt(req.params.cid, 10);
+  const row = (await db.prepare(`
+    SELECT ch.*, c.plate, c.assigned_to
+    FROM charges ch JOIN cars c ON c.id = ch.car_id
+    WHERE ch.id = ?`).get(cid));
+  if (!row) { res.status(404).json({ error: 'المطالبة غير موجودة' }); return null; }
+  if (!canTouchCar(req.user, row)) {
+    res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+    return null;
+  }
+  return row;
+}
+
+// ---------- إضافة مطالبة ----------
+router.post('/:id/charges', P.needs('charges.create'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = (await db.prepare('SELECT id, plate, assigned_to FROM cars WHERE id=?').get(id));
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+
+  const b = req.body || {};
+  const description = String(b.description || '').trim();
+  if (!description) return res.status(400).json({ error: 'اكتب وصف المطالبة' });
+
+  const amount = U.money(b.amount);
+  if (!(amount > 0)) return res.status(400).json({ error: 'المبلغ يجب أن يكون أكبر من صفر' });
+
+  const status = U.CHARGE_STATUSES.includes(b.status) ? b.status : 'متأخر';
+  const kind = U.CHARGE_KINDS.includes(b.kind) ? b.kind : 'أخرى';
+
+  const info = (await db.prepare(`
+    INSERT INTO charges (car_id, issued_at, invoice_no, kind, description, amount, status, paid_at, source, note, created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id,
+    U.parseDate(b.issued_at) || U.today(),
+    String(b.invoice_no || '').trim() || null,
+    kind, description, amount, status,
+    status === 'تم الدفع' ? (U.parseDate(b.paid_at) || U.today()) : null,
+    'يدوي',
+    String(b.note || '').trim() || null,
+    req.user.id
+  ));
+
+  A.audit(req.user.id, 'إضافة مطالبة', 'charges', Number(info.lastInsertRowid),
+    { plate: car.plate, amount, kind });
+  res.status(201).json({ id: Number(info.lastInsertRowid) });
+});
+
+// ---------- تغيير حالة المطالبة (تم الدفع / مرسل / متأخر) ----------
+router.post('/charges/:cid/status', P.needs('charges.settle'), async (req, res) => {
+  const row = await chargeOf(req, res);
+  if (!row) return;
+
+  const status = String((req.body || {}).status || '');
+  if (!U.CHARGE_STATUSES.includes(status))
+    return res.status(400).json({ error: 'حالة غير معروفة' });
+
+  // تاريخ السداد يُحفظ عند "تم الدفع" ويُمحى إن رجعت عنها
+  const paidAt = status === 'تم الدفع'
+    ? (U.parseDate((req.body || {}).paid_at) || row.paid_at || U.today())
+    : null;
+
+  (await db.prepare(`
+    UPDATE charges SET status=?, paid_at=?, updated_at=datetime('now','localtime') WHERE id=?`)
+    .run(status, paidAt, row.id));
+
+  A.audit(req.user.id, 'تغيير حالة مطالبة', 'charges', row.id,
+    { plate: row.plate, من: row.status, إلى: status, amount: row.amount });
+  res.json({ ok: true, status, paid_at: paidAt });
+});
+
+// ---------- تعديل مطالبة ----------
+router.put('/charges/:cid', P.needs('charges.edit'), async (req, res) => {
+  const row = await chargeOf(req, res);
+  if (!row) return;
+
+  const b = req.body || {};
+  const description = b.description !== undefined
+    ? String(b.description).trim() : row.description;
+  if (!description) return res.status(400).json({ error: 'اكتب وصف المطالبة' });
+
+  const amount = b.amount !== undefined ? U.money(b.amount) : row.amount;
+  if (!(amount > 0)) return res.status(400).json({ error: 'المبلغ يجب أن يكون أكبر من صفر' });
+
+  const status = U.CHARGE_STATUSES.includes(b.status) ? b.status : row.status;
+
+  (await db.prepare(`
+    UPDATE charges SET issued_at=?, invoice_no=?, kind=?, description=?, amount=?,
+      status=?, paid_at=?, note=?, updated_at=datetime('now','localtime')
+    WHERE id=?`).run(
+    b.issued_at !== undefined ? (U.parseDate(b.issued_at) || row.issued_at) : row.issued_at,
+    b.invoice_no !== undefined ? (String(b.invoice_no).trim() || null) : row.invoice_no,
+    U.CHARGE_KINDS.includes(b.kind) ? b.kind : row.kind,
+    description, amount, status,
+    status === 'تم الدفع' ? (U.parseDate(b.paid_at) || row.paid_at || U.today()) : null,
+    b.note !== undefined ? (String(b.note).trim() || null) : row.note,
+    row.id
+  ));
+
+  A.audit(req.user.id, 'تعديل مطالبة', 'charges', row.id, { plate: row.plate, amount });
+  res.json({ ok: true });
+});
+
+// ---------- حذف مطالبة ----------
+router.delete('/charges/:cid', P.needs('charges.delete'), async (req, res) => {
+  const row = await chargeOf(req, res);
+  if (!row) return;
+  (await db.prepare('DELETE FROM charges WHERE id=?').run(row.id));
+  A.audit(req.user.id, 'حذف مطالبة', 'charges', row.id,
+    { plate: row.plate, amount: row.amount, description: row.description });
   res.json({ ok: true });
 });
 

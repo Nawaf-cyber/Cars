@@ -115,6 +115,8 @@ app.get('/api/constants', (req, res) => {
     car_statuses: U.CAR_STATUSES,
     pay_methods: U.PAY_METHODS,
     channels: U.CHANNELS,
+    charge_kinds: U.CHARGE_KINDS,
+    charge_statuses: U.CHARGE_STATUSES,
     plate_letters: U.PLATE_LETTERS,
     company_name: getSetting('company_name'),
   });
@@ -162,8 +164,23 @@ app.post('/api/backup/run', A.requireManager, async (req, res) => {
  *   قاعدة مستضافة: سحب كل الجداول إلى ملف SQLite قائم بذاته
  * الملف الناتج يعمل على أي سيرفر بلا تعديل — وهو ضمانك أمام مزوّد القاعدة.
  */
+/**
+ * يحذف ملفاً مؤقتاً بلا أن يُسقط الخادم مهما حدث.
+ *
+ * على ويندوز يبقى الملف ممسوكاً لحظات بعد انتهاء التنزيل، فيفشل الحذف
+ * بـ EPERM — و{force:true} يتجاهل "غير موجود" فقط لا "مرفوض". الاستثناء
+ * كان يخرج من دالة رد نداء فيقتل العملية كلها. نحاول مرات ثم نستسلم بصمت.
+ */
+function removeTempFile(file, tries = 5) {
+  try {
+    require('fs').rmSync(file, { force: true });
+  } catch (e) {
+    if (tries > 0) return void setTimeout(() => removeTempFile(file, tries - 1), 400).unref();
+    console.warn('[تحذير] بقي ملف مؤقت بلا حذف:', file, '—', e.code || e.message);
+  }
+}
+
 app.get('/api/backup', A.requireManager, async (req, res) => {
-  const fs = require('fs');
   const os = require('os');
   const name = `backup-${U.today()}.db`;
   const tmp = path.join(os.tmpdir(), `export-${Date.now()}-${process.pid}.db`);
@@ -174,11 +191,11 @@ app.get('/api/backup', A.requireManager, async (req, res) => {
       { name, remote: db.isRemote, rows: info.rows });
 
     res.download(info.path, name, (err) => {
-      if (db.isRemote) fs.rmSync(tmp, { force: true });   // لا نترك نسخة على الخادم
+      if (db.isRemote) removeTempFile(tmp);   // لا نترك نسخة على الخادم
       if (err && !res.headersSent) res.status(500).json({ error: 'تعذّر تجهيز النسخة' });
     });
   } catch (e) {
-    fs.rmSync(tmp, { force: true });
+    removeTempFile(tmp);
     res.status(500).json({ error: 'تعذّر تجهيز النسخة: ' + e.message });
   }
 });

@@ -57,6 +57,12 @@ const CAPABILITIES = [
   { key: 'payments.create',    group: 'المتابعة',  label: 'تسجيل دفعة' },
   { key: 'payments.delete',    group: 'المتابعة',  label: 'حذف دفعة' },
 
+  { key: 'charges.view',       group: 'المتأخرات', label: 'رؤية المتأخرات والمطالبات' },
+  { key: 'charges.settle',     group: 'المتأخرات', label: 'تحديد أن المطالبة سُدّدت أو أُرسلت' },
+  { key: 'charges.create',     group: 'المتأخرات', label: 'إضافة مطالبة' },
+  { key: 'charges.edit',       group: 'المتأخرات', label: 'تعديل مبلغ المطالبة أو وصفها' },
+  { key: 'charges.delete',     group: 'المتأخرات', label: 'حذف مطالبة' },
+
   { key: 'employees.view',     group: 'الموظفون',  label: 'رؤية قائمة الموظفين' },
   { key: 'employees.add',      group: 'الموظفون',  label: 'إضافة موظف' },
   { key: 'employees.edit',     group: 'الموظفون',  label: 'تعديل موظف' },
@@ -82,6 +88,7 @@ const DEFAULTS = {
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',
     'cars.assign', 'cars.import',
     'followups.create', 'followups.delete', 'payments.create', 'payments.delete',
+    'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
@@ -91,6 +98,7 @@ const DEFAULTS = {
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',
     'cars.assign', 'cars.import',
     'followups.create', 'followups.delete', 'payments.create', 'payments.delete',
+    'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
@@ -100,11 +108,13 @@ const DEFAULTS = {
   deputy: [
     'cars.view_all', 'cars.edit_contact',
     'followups.create', 'payments.create',
+    'charges.view',
     'employees.view',
     'reports.performance', 'reports.export',
   ],
   employee: [
     'cars.edit_contact', 'followups.create', 'payments.create',
+    'charges.view', 'charges.settle',
   ],
 };
 

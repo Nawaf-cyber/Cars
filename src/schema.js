@@ -209,4 +209,43 @@ CREATE TABLE IF NOT EXISTS import_staging (
   user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+-- ============================================================================
+-- المتأخرات: مطالبات السائق سطراً سطراً (مخالفات، غرامات، رسوم خدمة، أمانات)
+-- ----------------------------------------------------------------------------
+-- الموظف يفتح السيارة برقم لوحتها فيرى ما على سائقها بالتفصيل، بدل أن يفتح
+-- برنامجاً آخر في نافذة ثانية. هذا هو ما كان يُقرأ من زوهو أثناء المكالمة.
+--
+-- ثلاث حالات فقط:
+--   متأخر    — مستحق ولم يُدفع
+--   مرسل     — أُرسلت المطالبة للسائق وننتظر
+--   تم الدفع — سُدّدت، ويُسجَّل تاريخها
+--
+-- external_id + source: عند ربط البرامج لاحقاً (زوهو/تم/لوجستي) يمنعان
+-- تكرار المطالبة نفسها في كل مزامنة.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS charges (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  car_id      INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+  issued_at   TEXT    NOT NULL DEFAULT (date('now','localtime')),
+  invoice_no  TEXT,                                -- رقم الفاتورة INV-013458
+  kind        TEXT    NOT NULL DEFAULT 'أخرى',     -- نوع المطالبة للتجميع
+  description TEXT    NOT NULL,                    -- الوصف كما هو في المصدر
+  amount      REAL    NOT NULL CHECK (amount >= 0),
+  status      TEXT    NOT NULL DEFAULT 'متأخر' CHECK (status IN ('متأخر','مرسل','تم الدفع')),
+  paid_at     TEXT,                                -- تاريخ السداد عند "تم الدفع"
+  source      TEXT    NOT NULL DEFAULT 'يدوي',     -- يدوي | زوهو | تم | لوجستي | استيراد
+  external_id TEXT,                                -- معرّفها في البرنامج المصدر
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_charges_car    ON charges(car_id);
+CREATE INDEX IF NOT EXISTS idx_charges_status ON charges(status);
+
+-- مطالبة واحدة لكل معرّف خارجي داخل نفس البرنامج
+CREATE UNIQUE INDEX IF NOT EXISTS idx_charges_external
+  ON charges(source, external_id) WHERE external_id IS NOT NULL;
 `;
