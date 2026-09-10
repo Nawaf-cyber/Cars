@@ -118,6 +118,8 @@ const DEFAULTS = {
   employee: [
     'cars.edit_contact', 'followups.create', 'payments.create',
     'charges.view', 'charges.settle',
+    // يصدّر سياراته وحده — الحصر في المسار لا في الواجهة
+    'reports.export',
   ],
 };
 

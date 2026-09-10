@@ -187,15 +187,17 @@ router.get('/audit', P.needs('reports.audit'), async (req, res) => {
 
 // ================= تصدير Excel =================
 router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
+  // الحصر هنا لا في الواجهة: الموظف يصدّر سياراته وحدها مهما عبث بالرابط
   const scope = A.isManagerLevel(req.user) ? '1=1' : 'c.assigned_to = ' + req.user.id;
   const rows = (await db.prepare(`
     SELECT c.plate AS "رقم اللوحة", c.plate_letters AS "حروف اللوحة", c.plate_digits AS "أرقام اللوحة",
            c.car_type AS "نوعها", c.driver_name AS "اسم السائق",
-           c.driver_phone AS "رقم التواصل", c.driver_id_no AS "رقم الهوية",
-           c.contract_no AS "رقم العقد", c.installment_amount AS "القسط الشهري",
+           c.driver_phone AS "رقم التواصل",
            c.total_amount AS "إجمالي المبلغ",
            IFNULL(p.paid,0) AS "المسدد",
            ROUND(c.total_amount - IFNULL(p.paid,0),2) AS "المتبقي",
+           IFNULL(ch.due,0) AS "إجمالي المتأخرات",
+           IFNULL(ch.open_cnt,0) AS "عدد المطالبات المفتوحة",
            c.status AS "الحالة",
            u.name AS "الموظف المسؤول", u.emp_code AS "رقم الموظف",
            IFNULL(f.cnt,0) AS "عدد مرات التواصل",
@@ -209,6 +211,10 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
     LEFT JOIN users ab ON ab.id = c.added_by
     LEFT JOIN (SELECT car_id, SUM(amount) paid FROM payments GROUP BY car_id) p ON p.car_id=c.id
     LEFT JOIN (SELECT car_id, COUNT(*) cnt, MAX(created_at) last_at FROM follow_ups GROUP BY car_id) f ON f.car_id=c.id
+    LEFT JOIN (SELECT car_id,
+                 SUM(CASE WHEN status <> 'تم الدفع' THEN amount ELSE 0 END) due,
+                 SUM(CASE WHEN status <> 'تم الدفع' THEN 1 ELSE 0 END)      open_cnt
+               FROM charges GROUP BY car_id) ch ON ch.car_id = c.id
     WHERE ${scope} ORDER BY u.name, c.plate`).all());
 
   const ws = XLSX.utils.json_to_sheet(rows);
