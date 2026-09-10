@@ -57,12 +57,12 @@ router.get('/summary', A.requireAuth, async (req, res) => {
     stale: (await db.prepare(`
       SELECT COUNT(*) n FROM cars c
       WHERE ${scope} AND c.status NOT IN ('مسدد','منتهي بالتمليك')
-        AND (SELECT MAX(created_at) FROM follow_ups f WHERE f.car_id=c.id) < datetime('now','localtime','-${gap} days')`).get()).n,
+        AND (SELECT MAX(created_at) FROM follow_ups f WHERE f.car_id=c.id) < datetime('now','+3 hours','-${gap} days')`).get()).n,
     broken_promise: (await db.prepare(`
       SELECT COUNT(*) n FROM cars c
       WHERE ${scope} AND c.status NOT IN ('مسدد','منتهي بالتمليك')
         AND (SELECT promise_date FROM follow_ups f WHERE f.car_id=c.id AND promise_date IS NOT NULL
-             ORDER BY f.id DESC LIMIT 1) < date('now','localtime')`).get()).n,
+             ORDER BY f.id DESC LIMIT 1) < date('now','+3 hours')`).get()).n,
     no_phone: (await db.prepare(`
       SELECT COUNT(*) n FROM cars c WHERE ${scope} AND (c.driver_phone IS NULL OR c.driver_phone='')`).get()).n,
     unassigned: isMgr

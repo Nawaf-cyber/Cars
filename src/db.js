@@ -64,7 +64,7 @@ async function migrateRoles() {
         phone         TEXT,
         max_cars      INTEGER,
         active        INTEGER NOT NULL DEFAULT 1,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+        created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
       );
       INSERT INTO users_new (id, emp_code, name, username, password_hash, role, phone, max_cars, active, created_at)
         SELECT id, emp_code, name, username, password_hash, role, phone, max_cars, active, created_at FROM users;

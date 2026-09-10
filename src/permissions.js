@@ -199,7 +199,7 @@ async function setRolePermissions(role, changes, actorRole) {
   const up = db.prepare(`INSERT INTO role_permissions (role, capability, enabled)
                          VALUES (?,?,?)
                          ON CONFLICT(role, capability)
-                         DO UPDATE SET enabled=excluded.enabled, updated_at=datetime('now','localtime')`);
+                         DO UPDATE SET enabled=excluded.enabled, updated_at=datetime('now','+3 hours')`);
   let n = 0;
   for (const [cap, val] of Object.entries(changes || {})) {
     if (!CAP_KEYS.has(cap)) continue;

@@ -204,7 +204,7 @@ router.post('/preview', P.needs('cars.import'), upload.single('file'), async (re
 
     // تنظيف ما مضى عليه أكثر من ساعتين
     await db.prepare(
-      "DELETE FROM import_staging WHERE created_at < datetime('now','localtime','-2 hours')").run();
+      "DELETE FROM import_staging WHERE created_at < datetime('now','+3 hours','-2 hours')").run();
 
     res.json({
       token,
@@ -315,7 +315,7 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
     const updateCar = tx.prepare(`
       UPDATE cars SET car_type=?, driver_name=COALESCE(?,driver_name), driver_phone=COALESCE(?,driver_phone),
         driver_id_no=COALESCE(?,driver_id_no), contract_no=COALESCE(?,contract_no),
-        total_amount=?, assigned_to=COALESCE(?,assigned_to), updated_at=datetime('now','localtime')
+        total_amount=?, assigned_to=COALESCE(?,assigned_to), updated_at=datetime('now','+3 hours')
       WHERE id=?`);
     const insertNote = tx.prepare(`
       INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, channel)

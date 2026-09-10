@@ -199,7 +199,7 @@ router.put('/payroll/:id/items/:itemId', P.needs('salaries.manage'), async (req,
 
   (await db.prepare('UPDATE payroll_items SET bonus=?, deductions=?, net=?, note=? WHERE id=?')
     .run(bonus, deductions, net, b.note === undefined ? item.note : (String(b.note).trim() || null), item.id));
-  (await db.prepare("UPDATE payroll_runs SET updated_at=datetime('now','localtime') WHERE id=?").run(runId));
+  (await db.prepare("UPDATE payroll_runs SET updated_at=datetime('now','+3 hours') WHERE id=?").run(runId));
   res.json({ ok: true, net });
 });
 
@@ -213,7 +213,7 @@ router.post('/payroll/:id/status', P.needs('salaries.manage'), async (req, res) 
   if (run.status === 'مدفوع' && status !== 'مدفوع')
     return res.status(400).json({ error: 'المسيّر المدفوع لا يُعاد فتحه' });
 
-  (await db.prepare("UPDATE payroll_runs SET status=?, updated_at=datetime('now','localtime') WHERE id=?")
+  (await db.prepare("UPDATE payroll_runs SET status=?, updated_at=datetime('now','+3 hours') WHERE id=?")
     .run(status, id));
   A.audit(req.user.id, 'تغيير حالة مسيّر', 'payroll_runs', id, { من: run.status, إلى: status });
   res.json({ ok: true, status });

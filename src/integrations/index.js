@@ -88,7 +88,7 @@ async function save(name, incoming, enabled) {
 
   await db.prepare(`
     INSERT INTO integrations (name, enabled, config, updated_at)
-    VALUES (?,?,?,datetime('now','localtime'))
+    VALUES (?,?,?,datetime('now','+3 hours'))
     ON CONFLICT(name) DO UPDATE SET
       enabled=excluded.enabled, config=excluded.config, updated_at=excluded.updated_at`)
     .run(name, enabled ? 1 : 0, JSON.stringify(next));
@@ -122,7 +122,7 @@ async function test(name) {
 async function record(name, ok, message) {
   await db.prepare(`
     INSERT INTO integrations (name, last_check_at, last_ok, last_message)
-    VALUES (?, datetime('now','localtime'), ?, ?)
+    VALUES (?, datetime('now','+3 hours'), ?, ?)
     ON CONFLICT(name) DO UPDATE SET
       last_check_at=excluded.last_check_at, last_ok=excluded.last_ok, last_message=excluded.last_message`)
     .run(name, ok, String(message || '').slice(0, 500));

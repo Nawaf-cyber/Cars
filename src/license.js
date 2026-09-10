@@ -111,7 +111,7 @@ async function updateLicense(patch) {
 
   await db.prepare(`UPDATE license SET status=?, client_name=?, plan=?, max_employees=?, max_cars=?,
               starts_at=?, expires_at=?, grace_days=?, suspend_reason=?, contact_note=?,
-              amount=?, billing_cycle=?, updated_at=datetime('now','localtime')
+              amount=?, billing_cycle=?, updated_at=datetime('now','+3 hours')
               WHERE id=1`).run(
     next.status, next.client_name || null, next.plan, next.max_employees, next.max_cars,
     next.starts_at, next.expires_at || null, next.grace_days,

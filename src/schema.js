@@ -6,7 +6,21 @@
    المصدر: src/schema.sql (يُعاد توليد هذا الملف منه)
    ============================================================================= */
 
-module.exports = `CREATE TABLE IF NOT EXISTS users (
+module.exports = `-- ============================================================================
+--  ملاحظة على التوقيت في هذا الملف
+--  ----------------------------------------------------------------------------
+--  كل الطوابع الزمنية تستعمل  '+3 hours'  لا 'localtime'.
+--
+--  السبب: القاعدة مستضافة خارج السعودية، و'localtime' تحسبها القاعدة بتوقيت
+--  خادمها هي. النتيجة كانت طوابع متأخرة ثلاث ساعات — والأخطر أن عمل الموظف
+--  بعد التاسعة مساءً كان يُسجَّل بتاريخ اليوم السابق، فيُحتسب في تقرير الأداء
+--  والبونص على يوم خاطئ.
+--
+--  السعودية UTC+3 دائماً بلا توقيت صيفي، فالإزاحة ثابتة ولا تحتاج جدولاً.
+--  إن نُشر النظام لبلد آخر يوماً، هذا هو الموضع الذي يُغيَّر.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   emp_code      TEXT    NOT NULL UNIQUE,          -- ID الموظف الفريد (EMP-001)
   name          TEXT    NOT NULL,
@@ -16,7 +30,7 @@ module.exports = `CREATE TABLE IF NOT EXISTS users (
   phone         TEXT,
   max_cars      INTEGER,                          -- سقف السيارات لهذا الموظف (NULL = يستخدم الافتراضي)
   active        INTEGER NOT NULL DEFAULT 1,
-  created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS cars (
@@ -46,8 +60,8 @@ CREATE TABLE IF NOT EXISTS cars (
   source         TEXT    NOT NULL DEFAULT 'يدوي', -- يدوي | استيراد
   batch_id       INTEGER REFERENCES import_batches(id) ON DELETE SET NULL,
   notes          TEXT,
-  created_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
-  updated_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at     TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 CREATE INDEX IF NOT EXISTS idx_cars_assigned ON cars(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_cars_status   ON cars(status);
@@ -62,7 +76,7 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   result_note  TEXT,                              -- إجباري عند "أخرى"
   promise_date TEXT,                              -- تاريخ الوعد بالسداد
   channel      TEXT    NOT NULL DEFAULT 'اتصال',  -- اتصال | واتساب | زيارة | رسالة
-  created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 CREATE INDEX IF NOT EXISTS idx_fu_car  ON follow_ups(car_id);
 CREATE INDEX IF NOT EXISTS idx_fu_user ON follow_ups(user_id);
@@ -75,9 +89,9 @@ CREATE TABLE IF NOT EXISTS payments (
   method     TEXT    NOT NULL DEFAULT 'تحويل',    -- نقدي | تحويل | شبكة | شيك
   ref_no     TEXT,
   note       TEXT,
-  paid_at    TEXT    NOT NULL DEFAULT (date('now','localtime')),
+  paid_at    TEXT    NOT NULL DEFAULT (date('now','+3 hours')),
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 CREATE INDEX IF NOT EXISTS idx_pay_car ON payments(car_id);
 
@@ -90,7 +104,7 @@ CREATE TABLE IF NOT EXISTS import_batches (
   rows_skipped  INTEGER NOT NULL DEFAULT 0,
   report        TEXT,
   created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -107,25 +121,25 @@ CREATE TABLE IF NOT EXISTS license (
   plan            TEXT    NOT NULL DEFAULT 'أساسي',
   max_employees   INTEGER NOT NULL DEFAULT 20,     -- 0 = بلا حد
   max_cars        INTEGER NOT NULL DEFAULT 0,
-  starts_at       TEXT    NOT NULL DEFAULT (date('now','localtime')),
+  starts_at       TEXT    NOT NULL DEFAULT (date('now','+3 hours')),
   expires_at      TEXT,                            -- NULL = بلا انتهاء
   grace_days      INTEGER NOT NULL DEFAULT 3,      -- سماح بعد الانتهاء
   suspend_reason  TEXT,                            -- تظهر للعميل عند الإيقاف
   contact_note    TEXT,                            -- وسيلة التواصل معك للتجديد
   amount          REAL,                            -- قيمة الاشتراك
   billing_cycle   TEXT    NOT NULL DEFAULT 'شهري',
-  updated_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 -- سجل مدفوعات الاشتراك (بينك وبين العميل)
 CREATE TABLE IF NOT EXISTS license_payments (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   amount     REAL NOT NULL,
-  paid_at    TEXT NOT NULL DEFAULT (date('now','localtime')),
+  paid_at    TEXT NOT NULL DEFAULT (date('now','+3 hours')),
   covers_to  TEXT,                                 -- التاريخ الذي يمتد له الاشتراك
   method     TEXT,
   note       TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 -- ---------- الصلاحيات كمفاتيح تُشغَّل وتُطفَأ ----------
@@ -134,7 +148,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   role       TEXT NOT NULL,
   capability TEXT NOT NULL,
   enabled    INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours')),
   PRIMARY KEY (role, capability)
 );
 
@@ -146,10 +160,10 @@ CREATE TABLE IF NOT EXISTS salaries (
   base_salary    REAL    NOT NULL DEFAULT 0,
   housing        REAL    NOT NULL DEFAULT 0,         -- بدل سكن
   transport      REAL    NOT NULL DEFAULT 0,         -- بدل نقل
-  effective_from TEXT    NOT NULL DEFAULT (date('now','localtime')),
+  effective_from TEXT    NOT NULL DEFAULT (date('now','+3 hours')),
   note           TEXT,
   created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 CREATE INDEX IF NOT EXISTS idx_sal_user ON salaries(user_id, effective_from);
 
@@ -160,8 +174,8 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
   status     TEXT NOT NULL DEFAULT 'مسودة' CHECK (status IN ('مسودة','معتمد','مدفوع')),
   note       TEXT,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 -- بند المسيّر لكل موظف — البونص يُقترح من تقرير الأداء ويبقى قابلاً للتعديل
@@ -189,14 +203,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entity     TEXT,
   entity_id  INTEGER,
   details    TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 -- ملفات الاستيراد المرفوعة مؤقتاً بين المعاينة والتنفيذ.
 -- تُخزَّن في القاعدة لا على القرص: الاستضافات بلا حالة قد توزّع الطلبين
@@ -207,7 +221,7 @@ CREATE TABLE IF NOT EXISTS import_staging (
   sheet      TEXT,
   rows_json  TEXT NOT NULL,          -- صفوف الملف بعد قراءتها
   user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 -- ============================================================================
@@ -227,7 +241,7 @@ CREATE TABLE IF NOT EXISTS import_staging (
 CREATE TABLE IF NOT EXISTS charges (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   car_id      INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
-  issued_at   TEXT    NOT NULL DEFAULT (date('now','localtime')),
+  issued_at   TEXT    NOT NULL DEFAULT (date('now','+3 hours')),
   invoice_no  TEXT,                                -- رقم الفاتورة INV-013458
   kind        TEXT    NOT NULL DEFAULT 'أخرى',     -- نوع المطالبة للتجميع
   description TEXT    NOT NULL,                    -- الوصف كما هو في المصدر
@@ -238,8 +252,8 @@ CREATE TABLE IF NOT EXISTS charges (
   external_id TEXT,                                -- معرّفها في البرنامج المصدر
   note        TEXT,
   created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
-  updated_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_charges_car    ON charges(car_id);
@@ -267,6 +281,6 @@ CREATE TABLE IF NOT EXISTS integrations (
   last_ok       INTEGER,                       -- 1 نجحت · 0 فشلت · NULL لم تُجرَّب
   last_message  TEXT,                          -- نتيجة آخر محاولة بالعربية
   last_sync_at  TEXT,                          -- آخر مزامنة ناجحة
-  updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 `;

@@ -28,7 +28,7 @@ router.get('/dashboard', async (req, res) => {
   // نشاط آخر 14 يوماً — دليل أن العميل يستخدم النظام فعلاً
   const activity = (await db.prepare(`
     SELECT date(created_at) d, COUNT(*) n FROM audit_log
-    WHERE created_at >= datetime('now','localtime','-14 days')
+    WHERE created_at >= datetime('now','+3 hours','-14 days')
     GROUP BY d ORDER BY d`).all());
 
   res.json({ license: lic, state, usage, payments, total_paid: U.money(paid), activity,

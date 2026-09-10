@@ -68,7 +68,7 @@ async function refreshStatus(carId) {
   if (remaining <= 0 && c.total_amount > 0) status = 'مسدد';
   else if (c.status === 'مسدد') status = 'قيد المتابعة'; // رجع عليه مبلغ
   if (status !== c.status)
-    (await db.prepare("UPDATE cars SET status=?, updated_at=datetime('now','localtime') WHERE id=?").run(status, carId));
+    (await db.prepare("UPDATE cars SET status=?, updated_at=datetime('now','+3 hours') WHERE id=?").run(status, carId));
 }
 
 // ================= قائمة السيارات =================
@@ -93,7 +93,7 @@ router.get('/', A.requireAuth, async (req, res) => {
   if (req.query.no_phone === '1') where.push("(c.driver_phone IS NULL OR c.driver_phone = '')");
   if (req.query.never_contacted === '1') where.push('IFNULL(f.cnt,0) = 0');
   if (req.query.overdue_promise === '1')
-    where.push("(SELECT promise_date FROM follow_ups WHERE car_id=c.id AND promise_date IS NOT NULL ORDER BY id DESC LIMIT 1) < date('now','localtime') AND c.status != 'مسدد'");
+    where.push("(SELECT promise_date FROM follow_ups WHERE car_id=c.id AND promise_date IS NOT NULL ORDER BY id DESC LIMIT 1) < date('now','+3 hours') AND c.status != 'مسدد'");
   if (req.query.unpaid === '1') where.push('(c.total_amount - IFNULL(p.paid,0)) > 0');
 
   const sortMap = {
@@ -229,7 +229,7 @@ router.put('/:id', A.requireAuth, async (req, res) => {
   if (!isMgr) {
     (await db.prepare(`
       UPDATE cars SET driver_name=?, driver_phone=?, driver_id_no=?, notes=?,
-        updated_at=datetime('now','localtime')
+        updated_at=datetime('now','+3 hours')
       WHERE id=?`).run(
       b.driver_name !== undefined ? (String(b.driver_name).trim() || null) : car.driver_name,
       phoneInfo.phone || null,
@@ -259,7 +259,7 @@ router.put('/:id', A.requireAuth, async (req, res) => {
       car_type=?, driver_name=?, driver_phone=?, driver_id_no=?,
       contract_no=?, contract_start=?, contract_months=?, installment_amount=?, contract_value=?,
       installments_paid=?, ownership_transferred=?, total_amount=?, status=?, assigned_to=?, notes=?,
-      updated_at=datetime('now','localtime')
+      updated_at=datetime('now','+3 hours')
     WHERE id=?`).run(
     plate, key,
     p ? p.letters.join('') : car.plate_letters,
@@ -304,7 +304,7 @@ router.post('/assign', P.needs('cars.assign'), async (req, res) => {
   if (to && !(await db.prepare('SELECT 1 FROM users WHERE id=? AND active=1').get(to)))
     return res.status(400).json({ error: 'الموظف المحدد غير موجود أو موقوف' });
 
-  const stmt = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','localtime') WHERE id=?");
+  const stmt = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','+3 hours') WHERE id=?");
   for (const id of ids) await stmt.run(to, id);
   A.audit(req.user.id, 'إسناد سيارات', 'cars', null, { count: ids.length, to });
   res.json({ ok: true, updated: ids.length });
@@ -339,7 +339,7 @@ router.post('/distribute', P.needs('cars.assign'), async (req, res) => {
     slots.push({ id: e.id, name: e.name, free: Math.max(cap - cur.n, 0), got: 0 });
   }
 
-  const upd = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','localtime') WHERE id=?");
+  const upd = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','+3 hours') WHERE id=?");
   let i = 0, distributed = 0;
   for (const car of pool) {
     // دوران على الموظفين حتى نجد من لديه سعة
@@ -391,7 +391,7 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   else if (['لم يتم التجاوب', 'الرقم مغلق', 'الرقم ليس للسائق', 'لا يوجد رقم للتواصل', 'رفض السداد'].includes(rc.code))
     status = 'متعذر';
   else if (car.status === 'مفتوح') status = 'قيد المتابعة';
-  (await db.prepare("UPDATE cars SET status=?, updated_at=datetime('now','localtime') WHERE id=?").run(status, id));
+  (await db.prepare("UPDATE cars SET status=?, updated_at=datetime('now','+3 hours') WHERE id=?").run(status, id));
   await refreshStatus(id);
 
   A.audit(req.user.id, 'تسجيل متابعة', 'cars', id, { result: rc.code });
@@ -538,7 +538,7 @@ router.post('/charges/:cid/status', P.needs('charges.settle'), async (req, res) 
     : null;
 
   (await db.prepare(`
-    UPDATE charges SET status=?, paid_at=?, updated_at=datetime('now','localtime') WHERE id=?`)
+    UPDATE charges SET status=?, paid_at=?, updated_at=datetime('now','+3 hours') WHERE id=?`)
     .run(status, paidAt, row.id));
 
   A.audit(req.user.id, 'تغيير حالة مطالبة', 'charges', row.id,
@@ -563,7 +563,7 @@ router.put('/charges/:cid', P.needs('charges.edit'), async (req, res) => {
 
   (await db.prepare(`
     UPDATE charges SET issued_at=?, invoice_no=?, kind=?, description=?, amount=?,
-      status=?, paid_at=?, note=?, updated_at=datetime('now','localtime')
+      status=?, paid_at=?, note=?, updated_at=datetime('now','+3 hours')
     WHERE id=?`).run(
     b.issued_at !== undefined ? (U.parseDate(b.issued_at) || row.issued_at) : row.issued_at,
     b.invoice_no !== undefined ? (String(b.invoice_no).trim() || null) : row.invoice_no,
@@ -664,8 +664,8 @@ router.post('/:id/charges/import', P.needs('charges.create'), async (req, res) =
       if (old) {
         if (old.status !== r.status) {
           await db.prepare(`UPDATE charges SET status=?, amount=?,
-            paid_at=CASE WHEN ?='تم الدفع' THEN COALESCE(paid_at, date('now','localtime')) ELSE NULL END,
-            updated_at=datetime('now','localtime') WHERE id=?`)
+            paid_at=CASE WHEN ?='تم الدفع' THEN COALESCE(paid_at, date('now','+3 hours')) ELSE NULL END,
+            updated_at=datetime('now','+3 hours') WHERE id=?`)
             .run(r.status, r.amount, r.status, old.id);
           updated++;
         }
@@ -682,7 +682,7 @@ router.post('/:id/charges/import', P.needs('charges.create'), async (req, res) =
     }
 
     await db.prepare(`
-      INSERT INTO integrations (name, last_sync_at) VALUES ('zoho', datetime('now','localtime'))
+      INSERT INTO integrations (name, last_sync_at) VALUES ('zoho', datetime('now','+3 hours'))
       ON CONFLICT(name) DO UPDATE SET last_sync_at=excluded.last_sync_at`).run();
 
     A.audit(req.user.id, 'جلب متأخرات من زوهو', 'cars', id,
