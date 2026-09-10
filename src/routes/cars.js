@@ -580,5 +580,110 @@ router.delete('/charges/:cid', P.needs('charges.delete'), async (req, res) => {
   res.json({ ok: true });
 });
 
+
+/* =============================================================================
+   جلب المتأخرات من زوهو برقم اللوحة
+   ---------------------------------------------------------------------------
+   هذا هو ما كان الموظف يفعله يدوياً: يفتح زوهو، يكتب رقم اللوحة، يقرأ ما على
+   السائق. صار زراً واحداً داخل السيارة.
+
+   خطوتان منفصلتان عمداً:
+     البحث   — يعرض ما وجده زوهو ولا يكتب شيئاً
+     الاستيراد — يكتب بعد أن يرى المستخدم النتيجة
+   لأن المطابقة تعتمد على ظهور رقم اللوحة في نص الفاتورة، وهي ليست يقيناً
+   مطلقاً. لا نعلّق مطالبة على سيارة قبل أن يراها إنسان.
+   ============================================================================= */
+
+/** يقرأ إعدادات زوهو ويتأكد أنه مشغّل — أو يشرح ما ينقص. */
+async function zohoReady() {
+  const row = await db.prepare("SELECT enabled FROM integrations WHERE name='zoho'").get();
+  if (!row || !row.enabled)
+    throw new Error('ربط زوهو غير مُشغَّل — فعّله من شاشة ربط البرامج');
+  const I = require('../integrations');
+  return { cfg: await I.configOf('zoho'), zoho: require('../integrations/zoho') };
+}
+
+// ---------- البحث (لا يكتب شيئاً) ----------
+router.get('/:id/charges/search', P.needs('charges.view'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = (await db.prepare('SELECT id, plate, plate_digits, assigned_to FROM cars WHERE id=?').get(id));
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (!car.plate_digits) return res.status(400).json({ error: 'اللوحة بلا أرقام — لا يمكن البحث' });
+
+  try {
+    const { cfg, zoho } = await zohoReady();
+    const rows = await zoho.searchByPlate(cfg, car.plate_digits);
+
+    // أيّها موجود عندنا أصلاً؟ نُعلِمه ولا نكرّره
+    const have = new Set((await db.prepare(
+      "SELECT external_id FROM charges WHERE car_id=? AND source='زوهو' AND external_id IS NOT NULL").all(id))
+      .map((r) => r.external_id));
+
+    res.json({
+      plate: car.plate,
+      searched: car.plate_digits,
+      found: rows.length,
+      rows: rows.map((r) => ({ ...r, exists: have.has(r.external_id) })),
+      new_count: rows.filter((r) => !have.has(r.external_id)).length,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---------- الاستيراد ----------
+router.post('/:id/charges/import', P.needs('charges.create'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = (await db.prepare('SELECT id, plate, plate_digits, assigned_to FROM cars WHERE id=?').get(id));
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+
+  const wanted = Array.isArray(req.body?.ids) ? new Set(req.body.ids.map(String)) : null;
+
+  try {
+    const { cfg, zoho } = await zohoReady();
+    const rows = await zoho.searchByPlate(cfg, car.plate_digits);
+    const chosen = wanted ? rows.filter((r) => wanted.has(r.external_id)) : rows;
+
+    let added = 0, updated = 0;
+    for (const r of chosen) {
+      // موجودة؟ نحدّث حالتها ومبلغها فقط — لا نلمس ما عدّله الموظف يدوياً
+      const old = (await db.prepare(
+        "SELECT id, status FROM charges WHERE car_id=? AND source='زوهو' AND external_id=?")
+        .get(id, r.external_id));
+
+      if (old) {
+        if (old.status !== r.status) {
+          await db.prepare(`UPDATE charges SET status=?, amount=?,
+            paid_at=CASE WHEN ?='تم الدفع' THEN COALESCE(paid_at, date('now','localtime')) ELSE NULL END,
+            updated_at=datetime('now','localtime') WHERE id=?`)
+            .run(r.status, r.amount, r.status, old.id);
+          updated++;
+        }
+        continue;
+      }
+
+      await db.prepare(`
+        INSERT INTO charges (car_id, issued_at, invoice_no, kind, description, amount, status, paid_at, source, external_id, created_by)
+        VALUES (?,?,?,?,?,?,?,?,'زوهو',?,?)`).run(
+        id, r.issued_at || U.today(), r.invoice_no, r.kind, r.description, r.amount, r.status,
+        r.status === 'تم الدفع' ? (r.issued_at || U.today()) : null,
+        r.external_id, req.user.id);
+      added++;
+    }
+
+    await db.prepare(`
+      INSERT INTO integrations (name, last_sync_at) VALUES ('zoho', datetime('now','localtime'))
+      ON CONFLICT(name) DO UPDATE SET last_sync_at=excluded.last_sync_at`).run();
+
+    A.audit(req.user.id, 'جلب متأخرات من زوهو', 'cars', id,
+      { plate: car.plate, أضيف: added, حُدّث: updated });
+    res.json({ ok: true, added, updated, total: chosen.length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 module.exports = router;
 module.exports.CAR_SELECT = CAR_SELECT;

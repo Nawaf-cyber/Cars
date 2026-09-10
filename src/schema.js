@@ -248,4 +248,25 @@ CREATE INDEX IF NOT EXISTS idx_charges_status ON charges(status);
 -- مطالبة واحدة لكل معرّف خارجي داخل نفس البرنامج
 CREATE UNIQUE INDEX IF NOT EXISTS idx_charges_external
   ON charges(source, external_id) WHERE external_id IS NOT NULL;
+
+-- ============================================================================
+-- ربط البرامج الخارجية (زوهو · تم · لوجستي)
+-- ----------------------------------------------------------------------------
+-- جدول مستقل عمداً لا داخل settings: ذاك يقرأه أي مستخدم مسجَّل عبر
+-- /api/settings، ومفاتيح الربط لا يجوز أن تمر من هناك. القراءة هنا تمر
+-- بصلاحية integrations.manage وحدها، والأسرار تُقنَّع قبل أن تغادر الخادم.
+--
+-- config نص JSON لأن كل برنامج يطلب حقولاً مختلفة، وتعريفها في الكود
+-- (src/integrations) لا في المخطط — فإضافة برنامج رابع لا تحتاج ترقية قاعدة.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS integrations (
+  name          TEXT PRIMARY KEY,              -- zoho | tam | logisti
+  enabled       INTEGER NOT NULL DEFAULT 0,
+  config        TEXT    NOT NULL DEFAULT '{}', -- JSON: القيم التي أدخلها المستخدم
+  last_check_at TEXT,                          -- آخر محاولة اتصال
+  last_ok       INTEGER,                       -- 1 نجحت · 0 فشلت · NULL لم تُجرَّب
+  last_message  TEXT,                          -- نتيجة آخر محاولة بالعربية
+  last_sync_at  TEXT,                          -- آخر مزامنة ناجحة
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
 `;

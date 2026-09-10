@@ -47,6 +47,7 @@
       <button data-tab="salaries" data-cap="salaries.view">الرواتب</button>
       <button data-tab="import" data-cap="cars.import">استيراد وتوزيع</button>
       <button data-tab="permissions" data-cap="features.manage">الصلاحيات</button>
+      <button data-tab="integrations" data-cap="integrations.manage">ربط البرامج</button>
       <button data-tab="settings" data-cap="settings.manage">الإعدادات</button>
     </nav>
     <div class="user-box">
@@ -222,6 +223,15 @@
     </section>
 
     <!-- ---------- الإعدادات ---------- -->
+    <section id="tab-integrations" class="tab-panel hidden">
+      <h2>ربط البرامج</h2>
+      <p class="muted" style="margin-bottom:1rem">
+        اربط النظام بالبرامج التي تستعملها الشركة، فتُجلب المتأخرات إلى صفحة السيارة
+        بدل فتح نافذة أخرى. المفاتيح تُحفظ ولا تظهر بعد الحفظ.
+      </p>
+      <div id="integrations-box"></div>
+    </section>
+
     <section id="tab-settings" class="tab-panel hidden">
       <h2>الإعدادات</h2>
       <form class="panel form-grid" id="settings-form">

@@ -77,6 +77,7 @@ const CAPABILITIES = [
 
   { key: 'settings.manage',    group: 'النظام',    label: 'تعديل إعدادات النظام' },
   { key: 'features.manage',    group: 'النظام',    label: 'تشغيل وإطفاء صلاحيات الأدوار' },
+  { key: 'integrations.manage', group: 'النظام',   label: 'ربط البرامج الخارجية (زوهو · تم)' },
 ];
 
 const CAP_KEYS = new Set(CAPABILITIES.map((c) => c.key));
@@ -92,7 +93,7 @@ const DEFAULTS = {
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
-    'settings.manage', 'features.manage',
+    'settings.manage', 'features.manage', 'integrations.manage',
   ],
   manager: [
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',

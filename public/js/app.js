@@ -262,6 +262,7 @@ const LOADERS = {
   dashboard: loadDashboard, cars: loadCars, performance: loadPerformance,
   employees: loadUsers, import: loadBatches, settings: loadSettings,
   permissions: loadPermissions, salaries: loadSalaries,
+  integrations: loadIntegrations,
 };
 function switchTab(name) {
   $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
@@ -696,7 +697,10 @@ function renderCharges(b, c, list) {
       ${dcell('منها مُرسَل', num(sent))}
       ${dcell('تم الدفع', `<span style="color:var(--ok)">${num(settled)}</span>`)}
     </div>
-    ${canAdd ? '<button class="btn primary" id="ch-add" style="margin-bottom:1rem">+ إضافة مطالبة</button>' : ''}
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">
+      ${canAdd ? '<button class="btn primary" id="ch-add">+ إضافة مطالبة</button>' : ''}
+      ${canAdd ? '<button class="btn" id="ch-zoho">🔍 جلب من زوهو</button>' : ''}
+    </div>
     <div class="table-wrap"><table class="data">
       <thead><tr>
         <th>التاريخ</th><th>رقم الفاتورة</th><th>الوصف</th><th>المبلغ</th>
@@ -736,6 +740,9 @@ function renderCharges(b, c, list) {
   const add = $('#ch-add', b);
   if (add) add.onclick = () => bindForm(openModal('إضافة مطالبة', chargeForm()), null);
 
+  const zoho = $('#ch-zoho', b);
+  if (zoho) zoho.onclick = () => searchZoho(c.id);
+
   $$('#ct-charge [data-editch]', b).forEach((x) => x.onclick = () => {
     const h = list.find((z) => z.id === Number(x.dataset.editch));
     bindForm(openModal('تعديل المطالبة', chargeForm(h)), h.id);
@@ -746,6 +753,146 @@ function renderCharges(b, c, list) {
       try { await api('/cars/charges/' + x.dataset.delch, { method: 'DELETE' }); reload(); }
       catch (e) { toast(e.message, 'bad'); }
     }));
+}
+
+/* ---------------- ربط البرامج الخارجية ---------------- */
+// الشاشة تُبنى من تعريف الحقول القادم من الخادم، فإضافة برنامج ثالث
+// لا تحتاج سطراً هنا.
+async function loadIntegrations() {
+  const box = $('#integrations-box');
+  if (!box) return;
+  box.innerHTML = '<p class="muted"><span class="spin"></span> جارٍ التحميل…</p>';
+  let d;
+  try { d = await api('/integrations'); }
+  catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+
+  const byName = Object.fromEntries(d.state.map((s) => [s.name, s]));
+
+  box.innerHTML = d.definitions.map((def) => {
+    const st = byName[def.name] || { values: {}, enabled: false };
+    const badge = st.last_ok === 1 ? '<span class="badge ok">متصل</span>'
+      : st.last_ok === 0 ? '<span class="badge bad">فشل الاتصال</span>'
+      : '<span class="badge">لم يُجرَّب</span>';
+
+    return `<div class="panel" style="margin-bottom:1rem">
+      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.4rem">
+        <h3 style="margin:0">${esc(def.label)}</h3>
+        ${badge}
+        ${def.pending ? '<span class="badge warn">بانتظار وثيقة الربط</span>' : ''}
+      </div>
+      ${st.last_message ? `<div class="alert ${st.last_ok ? 'ok' : 'error'}" style="margin:.4rem 0">${esc(st.last_message)}</div>` : ''}
+      ${def.pending && !st.last_message ? `<div class="alert info" style="margin:.4rem 0">${esc(def.note || '')}</div>` : ''}
+
+      <form data-int="${esc(def.name)}">
+        <div class="form-grid">
+          ${def.fields.map((f) => {
+            const v = st.values[f.key] ?? '';
+            const inp = f.type === 'select'
+              ? `<select name="${esc(f.key)}">${f.options.map((o) =>
+                  `<option value="${esc(o.value)}" ${v === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`
+              : `<input name="${esc(f.key)}" type="${f.secret ? 'password' : 'text'}"
+                   value="${esc(v)}" placeholder="${f.secret && v ? 'محفوظ — اتركه لعدم التغيير' : ''}"
+                   autocomplete="off" spellcheck="false">`;
+            return `<label>${esc(f.label)}${f.required ? ' *' : ''}${inp}
+              ${f.hint ? `<small class="muted">${esc(f.hint)}</small>` : ''}</label>`;
+          }).join('')}
+        </div>
+        <label class="check" style="margin:.6rem 0">
+          <input type="checkbox" name="__enabled" ${st.enabled ? 'checked' : ''}> تشغيل الربط
+        </label>
+        <div class="modal-actions" style="justify-content:flex-start;gap:.5rem">
+          <button class="btn primary">حفظ</button>
+          <button type="button" class="btn" data-test="${esc(def.name)}">اختبار الاتصال</button>
+          ${st.last_sync_at ? `<span class="muted" style="align-self:center">آخر جلب: ${dt(st.last_sync_at)}</span>` : ''}
+        </div>
+      </form>
+    </div>`;
+  }).join('');
+
+  $$('#integrations-box form[data-int]').forEach((f) => f.onsubmit = async (e) => {
+    e.preventDefault();
+    const values = Object.fromEntries(new FormData(e.target));
+    const enabled = !!e.target.__enabled?.checked;
+    delete values.__enabled;
+    try {
+      await api('/integrations/' + f.dataset.int, { method: 'PUT', body: { values, enabled } });
+      toast('حُفظت الإعدادات', 'ok');
+      loadIntegrations();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  });
+
+  $$('#integrations-box [data-test]').forEach((b) => b.onclick = async () => {
+    b.disabled = true;
+    const was = b.textContent;
+    b.textContent = 'جارٍ الاختبار…';
+    try {
+      const r = await api('/integrations/' + b.dataset.test + '/test', { method: 'POST' });
+      toast(r.message, r.ok ? 'ok' : 'bad');
+      loadIntegrations();
+    } catch (ex) { toast(ex.message, 'bad'); }
+    finally { b.disabled = false; b.textContent = was; }
+  });
+}
+
+/* ---------------- جلب المتأخرات من زوهو ---------------- */
+// ما كان الموظف يفعله في نافذة أخرى: يكتب رقم اللوحة ويقرأ ما على السائق.
+async function searchZoho(carId) {
+  const b = openModal('جلب المتأخرات من زوهو', '<p><span class="spin"></span> جارٍ البحث في زوهو…</p>', 'wide');
+  let d;
+  try { d = await api(`/cars/${carId}/charges/search`); }
+  catch (e) { b.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+
+  if (!d.found) {
+    b.innerHTML = `<div class="alert info">لم يجد زوهو أي فاتورة تحمل رقم اللوحة
+      <b>${esc(d.searched)}</b>.<br><small class="muted">تأكد أن رقم اللوحة مكتوب في اسم العميل أو وصف الفاتورة داخل زوهو.</small></div>`;
+    return;
+  }
+
+  b.innerHTML = `
+    <div class="alert ${d.new_count ? 'ok' : 'info'}">
+      وُجدت <b>${num(d.found)}</b> فاتورة برقم اللوحة <b>${esc(d.searched)}</b>،
+      منها <b>${num(d.new_count)}</b> جديدة.
+    </div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr>
+        <th><input type="checkbox" id="z-all" ${d.new_count ? 'checked' : ''}></th>
+        <th>التاريخ</th><th>رقم الفاتورة</th><th>الوصف</th><th>المبلغ</th><th>الحالة</th><th>العميل</th>
+      </tr></thead>
+      <tbody>${d.rows.map((r) => `<tr class="${r.exists ? 'muted' : ''}">
+        <td><input type="checkbox" data-z="${esc(r.external_id)}"
+          ${r.exists ? 'disabled title="مستوردة من قبل"' : 'checked'}></td>
+        <td>${r.issued_at ? dOnly(r.issued_at) : '—'}</td>
+        <td>${esc(r.invoice_no || '—')}</td>
+        <td>${esc(r.description)}<div class="muted" style="font-size:.8em">${esc(r.kind)}</div></td>
+        <td class="num"><b>${num(r.amount)}</b></td>
+        <td><span class="badge ${CHARGE_CLASS[r.status] || ''}">${esc(r.status)}</span></td>
+        <td>${esc(r.customer || '—')}${r.exists ? ' <span class="badge">مستوردة</span>' : ''}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="modal-actions">
+      <button class="btn primary" id="z-import" ${d.new_count ? '' : 'disabled'}>استيراد المحدَّد</button>
+    </div>`;
+
+  const all = $('#z-all', b);
+  all.onchange = () => $$('[data-z]', b).forEach((x) => { if (!x.disabled) x.checked = all.checked; });
+
+  $('#z-import', b).onclick = async (e) => {
+    const ids = $('[data-z]', b).filter((x) => x.checked && !x.disabled).map((x) => x.dataset.z);
+    if (!ids.length) return toast('لم تختر شيئاً', 'warn');
+    e.target.disabled = true;
+    e.target.textContent = 'جارٍ الاستيراد…';
+    try {
+      const r = await api(`/cars/${carId}/charges/import`, { method: 'POST', body: { ids } });
+      toast(`أُضيفت ${r.added} مطالبة` + (r.updated ? ` وحُدّثت ${r.updated}` : ''), 'ok');
+      closeModal();
+      openCar(carId);
+      loadCars();
+    } catch (ex) {
+      toast(ex.message, 'bad');
+      e.target.disabled = false;
+      e.target.textContent = 'استيراد المحدَّد';
+    }
+  };
 }
 
 function dcell(k, v) { return `<div class="d"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`; }
