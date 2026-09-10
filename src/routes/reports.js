@@ -188,42 +188,49 @@ router.get('/audit', P.needs('reports.audit'), async (req, res) => {
 // ================= تصدير Excel =================
 router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
   // الحصر هنا لا في الواجهة: الموظف يصدّر سياراته وحدها مهما عبث بالرابط
-  const scope = A.isManagerLevel(req.user) ? '1=1' : 'c.assigned_to = ' + req.user.id;
-  const rows = (await db.prepare(`
-    SELECT c.plate AS "رقم اللوحة", c.plate_letters AS "حروف اللوحة", c.plate_digits AS "أرقام اللوحة",
-           c.car_type AS "نوعها", c.driver_name AS "اسم السائق",
-           c.driver_phone AS "رقم التواصل",
-           c.total_amount AS "إجمالي المبلغ",
-           IFNULL(p.paid,0) AS "المسدد",
-           ROUND(c.total_amount - IFNULL(p.paid,0),2) AS "المتبقي",
-           IFNULL(ch.due,0) AS "إجمالي المتأخرات",
-           IFNULL(ch.open_cnt,0) AS "عدد المطالبات المفتوحة",
-           c.status AS "الحالة",
-           u.name AS "الموظف المسؤول", u.emp_code AS "رقم الموظف",
-           IFNULL(f.cnt,0) AS "عدد مرات التواصل",
-           f.last_at AS "آخر تواصل",
-           (SELECT result_code FROM follow_ups WHERE car_id=c.id ORDER BY id DESC LIMIT 1) AS "آخر نتيجة",
-           (SELECT result_note FROM follow_ups WHERE car_id=c.id ORDER BY id DESC LIMIT 1) AS "تفاصيل النتيجة",
-           (SELECT promise_date FROM follow_ups WHERE car_id=c.id AND promise_date IS NOT NULL ORDER BY id DESC LIMIT 1) AS "تاريخ الوعد",
-           ab.name AS "أضافها", c.created_at AS "تاريخ الإضافة"
-    FROM cars c
-    LEFT JOIN users u  ON u.id = c.assigned_to
-    LEFT JOIN users ab ON ab.id = c.added_by
-    LEFT JOIN (SELECT car_id, SUM(amount) paid FROM payments GROUP BY car_id) p ON p.car_id=c.id
-    LEFT JOIN (SELECT car_id, COUNT(*) cnt, MAX(created_at) last_at FROM follow_ups GROUP BY car_id) f ON f.car_id=c.id
-    LEFT JOIN (SELECT car_id,
-                 SUM(CASE WHEN status <> 'تم الدفع' THEN amount ELSE 0 END) due,
-                 SUM(CASE WHEN status <> 'تم الدفع' THEN 1 ELSE 0 END)      open_cnt
-               FROM charges GROUP BY car_id) ch ON ch.car_id = c.id
-    WHERE ${scope} ORDER BY u.name, c.plate`).all());
+  const mine = A.isManagerLevel(req.user);
+  const scope = mine ? '1=1' : 'c.assigned_to = ' + req.user.id;
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = Object.keys(rows[0] || { a: 1 }).map(() => ({ wch: 16 }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'السيارات');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const rows = (await db.prepare(`
+    SELECT c.plate, c.car_type, c.driver_name, c.driver_phone, c.total_amount,
+           u.name AS emp_name,
+           IFNULL(f.cnt, 0) AS contacts,
+           (SELECT result_note FROM follow_ups WHERE car_id=c.id AND result_note IS NOT NULL
+              AND TRIM(result_note) <> '' ORDER BY id DESC LIMIT 1) AS note,
+           (SELECT result_code FROM follow_ups WHERE car_id=c.id ORDER BY id DESC LIMIT 1) AS code
+    FROM cars c
+    LEFT JOIN users u ON u.id = c.assigned_to
+    LEFT JOIN (SELECT car_id, COUNT(*) cnt FROM follow_ups GROUP BY car_id) f ON f.car_id = c.id
+    WHERE ${scope}
+    ORDER BY u.name, c.plate`).all());
+
+  /* "النتيجة" في كشفهم عمود واحد يُكتب فيه ما قاله السائق. عندنا هي متابعة
+     مركّبة: نتيجة مختارة + تفاصيل حرّة. نجمعهما كما يقرؤهما الموظف. */
+  const byEmployee = new Map();
+  for (const r of rows) {
+    const key = r.emp_name || 'غير مسندة';
+    if (!byEmployee.has(key)) byEmployee.set(key, []);
+    byEmployee.get(key).push({
+      plate: r.plate,
+      type: r.car_type,
+      driver: r.driver_name,
+      phone: r.driver_phone,
+      amount: r.total_amount,
+      contacted: r.contacts > 0,
+      result: [r.code, r.note].filter(Boolean).join(' — '),
+    });
+  }
+
+  const buf = await require('../excel').buildCollectionFile(byEmployee);
+  const who = mine ? 'التحصيل' : (req.user.name || 'التحصيل');
+
+  A.audit(req.user.id, 'تصدير ملف التحصيل', null, null,
+    { سيارات: rows.length, أوراق: byEmployee.size });
+
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="cars-${U.today()}.xlsx"`);
+  // اسم الملف عربي: نرسله مرمَّزاً في filename* ونترك اسماً لاتينياً احتياطاً
+  const fname = encodeURIComponent(who + String.fromCharCode(32) + "تحصيل" + String.fromCharCode(32) + U.today() + ".xlsx");
+  res.setHeader("Content-Disposition", "attachment; filename=\"collection.xlsx\"; filename*=UTF-8''" + fname);
   res.send(buf);
 });
 

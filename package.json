@@ -15,6 +15,7 @@
     "@libsql/client": "^0.18.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
+    "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "multer": "^2.3.0",
     "xlsx": "^0.18.5"
@@ -23,10 +24,10 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@libsql/linux-x64-gnu": "*",
-    "@libsql/linux-arm64-gnu": "*",
-    "@libsql/darwin-x64": "*",
     "@libsql/darwin-arm64": "*",
+    "@libsql/darwin-x64": "*",
+    "@libsql/linux-arm64-gnu": "*",
+    "@libsql/linux-x64-gnu": "*",
     "@libsql/win32-x64-msvc": "*"
   }
 }
