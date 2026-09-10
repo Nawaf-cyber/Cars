@@ -3,7 +3,10 @@
 /* يقرأ ملف .env إن وُجد (للتشغيل المحلي).
    على الاستضافات تأتي المتغيّرات من لوحة التحكم فلا يوجد ملف — وهذا طبيعي. */
 (function loadEnvFile() {
-  const p = require('path').join(__dirname, '.env');
+  // ENV_FILE يسمح بتشغيل نسخة اختبار أو تجريبية بقاعدة أخرى بلا لمس .env
+  // مثال:  ENV_FILE=.env.test node server.js
+  const file = process.env.ENV_FILE || '.env';
+  const p = require('path').isAbsolute(file) ? file : require('path').join(__dirname, file);
   if (!require('fs').existsSync(p)) return;
   try { process.loadEnvFile(p); }
   catch {
@@ -171,11 +174,13 @@ app.post('/api/backup/run', A.requireManager, async (req, res) => {
  * بـ EPERM — و{force:true} يتجاهل "غير موجود" فقط لا "مرفوض". الاستثناء
  * كان يخرج من دالة رد نداء فيقتل العملية كلها. نحاول مرات ثم نستسلم بصمت.
  */
-function removeTempFile(file, tries = 5) {
+function removeTempFile(file, tries = 8, wait = 300) {
   try {
     require('fs').rmSync(file, { force: true });
   } catch (e) {
-    if (tries > 0) return void setTimeout(() => removeTempFile(file, tries - 1), 400).unref();
+    // المهلة تتضاعف: ويندوز قد يمسك الملف ثوانيَ بعد انتهاء الإرسال
+    if (tries > 0)
+      return void setTimeout(() => removeTempFile(file, tries - 1, wait * 2), wait).unref();
     console.warn('[تحذير] بقي ملف مؤقت بلا حذف:', file, '—', e.code || e.message);
   }
 }
@@ -186,12 +191,13 @@ app.get('/api/backup', A.requireManager, async (req, res) => {
   const tmp = path.join(os.tmpdir(), `export-${Date.now()}-${process.pid}.db`);
 
   try {
-    const info = await db.exportToFile(db.isRemote ? tmp : db.DB_FILE);
+    // دائماً إلى ملف مؤقت — لا إلى القاعدة نفسها
+    const info = await db.exportToFile(tmp);
     A.audit(req.user.id, 'تنزيل نسخة احتياطية', null, null,
       { name, remote: db.isRemote, rows: info.rows });
 
     res.download(info.path, name, (err) => {
-      if (db.isRemote) removeTempFile(tmp);   // لا نترك نسخة على الخادم
+      removeTempFile(tmp);                    // لا نترك نسخة على الخادم
       if (err && !res.headersSent) res.status(500).json({ error: 'تعذّر تجهيز النسخة' });
     });
   } catch (e) {

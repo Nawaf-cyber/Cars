@@ -164,8 +164,28 @@ const TRANSIENT = new Set(['sessions', 'import_staging']);
 async function exportToFile(targetPath) {
   // ملف محلي؟ نسخة مباشرة أدق وأسرع
   if (!sql.isRemote) {
+    // copyFileSync على المسار نفسه يقتطع الملف قبل النسخ فيمحو القاعدة كلها.
+    // حدث فعلاً: كان الخادم يمرّر DB_FILE هدفاً، فيتلف "تنزيل النسخة" البيانات.
+    if (path.resolve(targetPath) === path.resolve(sql.DB_FILE))
+      throw new Error('لا يمكن كتابة النسخة فوق القاعدة نفسها — اختر مساراً آخر');
     await checkpoint();
     fs.copyFileSync(sql.DB_FILE, targetPath);
+
+    // النسخة الخام تحمل جدول الجلسات، أي رموز دخول صالحة لمن يفتح الملف.
+    // ننظّفها لتطابق سلوك التصدير من القاعدة المستضافة تماماً.
+    try {
+      const out = require('@libsql/client').createClient({
+        url: 'file:' + targetPath.split(String.fromCharCode(92)).join('/') });
+      try {
+        // بلا هذا يذهب الحذف إلى ملف -wal جانبي، ويُنزَّل الملف الأصلي بجلساته
+        await out.execute('PRAGMA journal_mode = DELETE');
+        for (const t of TRANSIENT) await out.execute('DELETE FROM ' + t);
+        await out.execute('VACUUM');
+      } finally { out.close(); }
+    } catch (e) {
+      console.warn('[تحذير] بقيت الجلسات داخل النسخة:', e.message);
+    }
+
     return { path: targetPath, tables: null, rows: null, copied: true };
   }
 
