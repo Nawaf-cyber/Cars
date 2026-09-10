@@ -1041,10 +1041,10 @@ function carForm(c = {}, mgr = false) {
         <input name="total_amount" type="number" step="0.01" min="0" value="${v('total_amount', 0)}"></label>
       <label>الحالة<select name="status">${S.consts.car_statuses.map((s) =>
         `<option ${c.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>
-      <label>الموظف المسؤول<select name="assigned_to">
+      ${cap('cars.assign') ? `<label>الموظف المسؤول<select name="assigned_to">
         <option value="">— غير مسندة —</option>
         ${S.employees.map((e) => `<option value="${e.id}" ${c.assigned_to === e.id ? 'selected' : ''}>${esc(e.name)} (${e.cars_count})</option>`).join('')}
-      </select></label>
+      </select></label>` : ''}
     </div>
     <label>ملاحظات<textarea name="notes">${v('notes')}</textarea></label>
     <div class="modal-actions"><button class="btn primary">${c.id ? 'حفظ التعديلات' : 'إضافة السيارة'}</button></div>
@@ -1071,7 +1071,10 @@ function bindCarForm(form, id, after) {
 }
 
 $('#btn-add-car').onclick = () => {
-  const b = openModal('إضافة سيارة جديدة', carForm({}, true));
+  // من لا يملك الإسناد تُسنَد له سيارته — نقولها له قبل أن يسأل أين ذهبت
+  const mine = !cap('cars.assign')
+    ? '<div class="alert info">ستُسنَد السيارة إليك تلقائياً وتظهر في قائمتك.</div>' : '';
+  const b = openModal('إضافة سيارة جديدة', mine + carForm({}, true));
   bindCarForm($('#car-form', b), null, () => { closeModal(); loadEmployees(); loadCars(); });
 };
 

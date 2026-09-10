@@ -173,7 +173,15 @@ router.post('/', P.needs('cars.add'), async (req, res) => {
   const carType = U.CAR_TYPES.includes(b.car_type) ? b.car_type : 'نقل عام';
   const phoneInfo = U.normalizePhone(b.driver_phone);
 
-  let assignedTo = b.assigned_to ? parseInt(b.assigned_to, 10) : null;
+  /* من لا يملك حق الإسناد تُسنَد له سيارته تلقائياً.
+     بدون هذا تُنشأ السيارة بلا صاحب، والموظف لا يرى إلا سياراته — فتختفي
+     أمامه لحظة إضافتها ويُمنع حتى من فتحها. حدث فعلاً عند أول استعمال. */
+  let assignedTo;
+  if (P.can(req.user, 'cars.assign')) {
+    assignedTo = b.assigned_to ? parseInt(b.assigned_to, 10) : null;
+  } else {
+    assignedTo = req.user.id;
+  }
   if (assignedTo && !(await db.prepare('SELECT 1 FROM users WHERE id=? AND active=1').get(assignedTo)))
     return res.status(400).json({ error: 'الموظف المحدد غير موجود أو موقوف' });
 
