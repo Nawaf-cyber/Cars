@@ -25,8 +25,13 @@ const store = {
  * ولكل نسخة ذاكرتها. لو أوقفتَ الاشتراك، تبقى النسخ الأخرى تعمل بالحالة القديمة
  * حتى تُعاد. لذلك نجدّد الذاكرة دورياً هناك.
  * محلياً نسخة واحدة فقط، والكتابة تجدّد الذاكرة فوراً — فلا حاجة للتجديد الدوري.
+ *
+ * CACHE_TTL_MS يتجاوز ذلك عند الحاجة: بيئة الاختبار تعدّل القاعدة من خارج
+ * الخادم، والذاكرة الأبدية تُبقي الخادم على حالة قديمة لا تنتهي.
  */
-const TTL_MS = db.isRemote ? 10_000 : Infinity;
+const TTL_MS = Number(process.env.CACHE_TTL_MS) > 0
+  ? Number(process.env.CACHE_TTL_MS)
+  : (db.isRemote ? 10_000 : Infinity);
 
 let inFlight = null;
 async function freshen() {

@@ -77,6 +77,8 @@ const CAPABILITIES = [
 
   { key: 'settings.manage',    group: 'النظام',    label: 'تعديل إعدادات النظام' },
   { key: 'features.manage',    group: 'النظام',    label: 'تشغيل وإطفاء صلاحيات الأدوار' },
+  // مطفأة للجميع افتراضياً: المفاتيح تخص من يملك النظام لا من يديره.
+  // المالك يتجاوزها دائماً، ويستطيع منحها لمن يشاء بضغطة.
   { key: 'integrations.manage', group: 'النظام',   label: 'ربط البرامج الخارجية (زوهو · تم)' },
 ];
 
@@ -93,7 +95,7 @@ const DEFAULTS = {
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
-    'settings.manage', 'features.manage', 'integrations.manage',
+    'settings.manage', 'features.manage',
   ],
   manager: [
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',

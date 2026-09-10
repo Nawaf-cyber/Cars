@@ -131,6 +131,7 @@ function statusBadge(s) { return `<span class="badge ${STATUS_CLASS[s] || ''}">$
    الدخول والإقلاع
    ============================================================ */
 function showLogin() {
+  purgeExtraUI();
   $('#app').classList.add('hidden');
   $('#login-screen').classList.remove('hidden');
   $('#login-form').reset();
@@ -185,7 +186,8 @@ $('#login-form').onsubmit = async (e) => {
 $('#btn-logout').onclick = async () => {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
   S.user = null;
-  showLogin();
+  // إعادة تحميل كاملة: لا يبقى في الذاكرة ولا في الصفحة أثرٌ لمن خرج
+  location.reload();
 };
 
 $('#btn-password').onclick = () => {
@@ -220,12 +222,26 @@ async function boot() {
   showApp();
   // بعض المستخدمين لهم واجهة إضافية يقرّرها الخادم ويقدّمها من مسار محمي
   if (S.user.extra_ui) await loadExtraUI();
+  else purgeExtraUI();   // مستخدم بلا هذه الواجهة: انزع ما حقنه من سبقه
   fillSelect($('#f-status'), S.consts.car_statuses, 'كل الحالات');
   fillSelect($('#f-type'), S.consts.car_types, 'كل الأنواع');
   if (isMgr()) await loadEmployees();
   $('#dash-from').value = $('#perf-from').value = monthStart();
   $('#dash-to').value = $('#perf-to').value = todayISO();
   switchTab('dashboard');
+}
+
+/**
+ * نزع الواجهة الإضافية من الصفحة.
+ *
+ * التطبيق صفحة واحدة لا تُعاد تحميلها عند تبديل المستخدم، فما تحقنه لوحة
+ * المالك يبقى في DOM بعد خروجه. حدث فعلاً: موظف دخل بعد المالك على نفس
+ * المتصفح فرأى "إدارة الاشتراك" وأزرار إيقاف النظام. الخادم كان يرفض
+ * طلباتها (403) فلم تتسرّب بيانات، لكن وجود اللوحة وحده يكشف ما يجب ألا يُعرف.
+ */
+function purgeExtraUI() {
+  document.querySelectorAll('[data-owner-ui]').forEach((el) => el.remove());
+  extraLoaded = false;
 }
 
 // تحميل الواجهة الإضافية مرة واحدة (وسم <script> ليبقى متوافقاً مع سياسة أمان المحتوى)

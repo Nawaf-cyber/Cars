@@ -52,7 +52,12 @@ router.post('/', P.needs('employees.add'), async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
-  const role = P.CLIENT_ROLES.includes(req.body?.role) ? req.body.role : 'employee';
+  // لا نخفّض الدور بصمت: من طلب دوراً ممنوعاً يجب أن يُخبَر، لا أن يُنشأ
+  // له حساب بدور آخر يظنه ما طلب.
+  const asked = req.body?.role;
+  if (asked !== undefined && asked !== '' && !P.CLIENT_ROLES.includes(asked))
+    return res.status(400).json({ error: 'دور غير معروف' });
+  const role = P.CLIENT_ROLES.includes(asked) ? asked : 'employee';
   const phone = String(req.body?.phone || '').trim() || null;
   const maxCars = req.body?.max_cars == null || req.body.max_cars === ''
     ? null : parseInt(req.body.max_cars, 10);
@@ -70,6 +75,9 @@ router.post('/', P.needs('employees.add'), async (req, res) => {
     return res.status(400).json({ error: 'سقف السيارات يجب أن يكون رقماً صحيحاً' });
 
   const code = String(req.body?.emp_code || '').trim() || await nextEmpCode(role);
+  // OWN- بادئة المالك وحده — لا يتقمّصها أحد ولو كان الرقم متاحاً
+  if (/^OWN[-_]/i.test(code) && req.user.role !== 'owner')
+    return res.status(400).json({ error: 'رقم الموظف يبدأ ببادئة محجوزة' });
   if ((await db.prepare('SELECT 1 FROM users WHERE emp_code = ?').get(code)))
     return res.status(409).json({ error: 'رقم الموظف مستخدم من قبل' });
 
