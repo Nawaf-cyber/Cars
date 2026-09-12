@@ -9,7 +9,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "check-db": "node \"فحص القاعدة.js\"",
-    "make-token": "node \"توليد توكن القاعدة.js\""
+    "make-token": "node \"توليد توكن القاعدة.js\"",
+    "check-ui": "node \"فحص الواجهة.js\""
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

@@ -443,9 +443,9 @@ async function loadCars() {
     }).join('');
   }
 
-  $('#cars-body [data-open]').forEach((b) => b.onclick = () => openCar(+b.dataset.open));
+  $$('#cars-body [data-open]').forEach((b) => b.onclick = () => openCar(+b.dataset.open));
   // تغيير الحالة بلا فتح السيارة — الموظف يمرّ على قائمته بسرعة
-  $('#cars-body [data-state]').forEach((sel) => sel.onchange = async () => {
+  $$('#cars-body [data-state]').forEach((sel) => sel.onchange = async () => {
     const was = sel.dataset.prev ?? '';
     try {
       await api(`/cars/${sel.dataset.state}/state`, { method: 'POST', body: { car_state: sel.value } });
@@ -911,7 +911,7 @@ async function searchZoho(carId) {
   all.onchange = () => $$('[data-z]', b).forEach((x) => { if (!x.disabled) x.checked = all.checked; });
 
   $('#z-import', b).onclick = async (e) => {
-    const ids = $('[data-z]', b).filter((x) => x.checked && !x.disabled).map((x) => x.dataset.z);
+    const ids = $$('[data-z]', b).filter((x) => x.checked && !x.disabled).map((x) => x.dataset.z);
     if (!ids.length) return toast('لم تختر شيئاً', 'warn');
     e.target.disabled = true;
     e.target.textContent = 'جارٍ الاستيراد…';
@@ -1446,7 +1446,7 @@ function renderPreview(d) {
     // حقول الإسناد لا تُعرض لمن لا يوزّع — والخادم يُسند له سياراته تلقائياً
     const mode = $('input[name=am]:checked')?.value || 'single';
     const empMap = {};
-    $('#emp-map select').forEach((s2) => { if (s2.value) empMap[s2.dataset.empname] = +s2.value; });
+    $$('#emp-map select').forEach((s2) => { if (s2.value) empMap[s2.dataset.empname] = +s2.value; });
 
     const btn = $('#imp-commit');
     btn.disabled = true;
