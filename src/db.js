@@ -14,6 +14,36 @@ const SCHEMA = require('./schema');   // مدمج في الكود — لا يُ�
 
 const EXPECTED_TABLES = (SCHEMA.match(/CREATE TABLE IF NOT EXISTS/g) || []).length;
 
+const SQL_KEYWORDS = new Set(['UNIQUE', 'PRIMARY', 'FOREIGN', 'CHECK', 'CONSTRAINT']);
+
+/**
+ * أعمدة كل جدول كما يعرّفها المخطط: { users: ['id', 'emp_code', …], … }
+ *
+ * تُستخرج من المخطط نفسه لا تُكتب يدوياً. السبب أن اختصار الإقلاع أدناه كان
+ * يتخطّى الترقيات: نضيف عموداً جديداً فيرى الفحصُ الجداولَ موجودةً فيخرج،
+ * وتبقى القاعدة العاملة بلا العمود — و"CREATE TABLE IF NOT EXISTS" لا يضيفه.
+ * بهذا يُكشف أي عمود ناقص تلقائياً مهما أضفنا لاحقاً.
+ */
+const EXPECTED_COLUMNS = (() => {
+  const out = {};
+  const re = /CREATE TABLE IF NOT EXISTS (\w+)\s*\(([\s\S]*?)\n\);/g;
+  let m;
+  while ((m = re.exec(SCHEMA))) {
+    out[m[1]] = m[2]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('--'))
+      .map((line) => (line.match(/^([A-Za-z_]\w*)/) || [])[1])
+      .filter((word) => word && !SQL_KEYWORDS.has(word.toUpperCase()));
+  }
+  return out;
+})();
+
+/** هل يحتوي تعريف الجدول على هذا العمود؟ (حدود الكلمة تمنع مطابقة جزئية) */
+function definesColumn(tableSql, column) {
+  return new RegExp('[(,\\s]' + column + '\\s').test(tableSql);
+}
+
 async function init() {
   if (!sql.isRemote) {
     // إعدادات تخص الملف المحلي فقط
@@ -26,18 +56,35 @@ async function init() {
   /* على قاعدة مستضافة كل عبارة رحلة شبكة كاملة، وإنشاء المخطط يعني عشرات
      الرحلات في كل بداية باردة. فحص واحد يخبرنا إن كان كل شيء جاهزاً أصلاً. */
   const probe = await sql.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%') AS tables,
-      (SELECT sql FROM sqlite_master WHERE type='table' AND name='users') AS users_sql,
-      (SELECT sql FROM sqlite_master WHERE type='table' AND name='cars')  AS cars_sql
+    SELECT COUNT(*) AS tables,
+           group_concat(name || ':' || COALESCE(sql, ''), char(30)) AS defs
+    FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
   `).get();
+
+  // تعريف كل جدول كما هو فعلاً في القاعدة
+  const live = {};
+  for (const part of String(probe?.defs || '').split(String.fromCharCode(30))) {
+    const at = part.indexOf(':');
+    if (at > 0) live[part.slice(0, at)] = part.slice(at + 1);
+  }
+
+  const missing = [];
+  for (const [table, columns] of Object.entries(EXPECTED_COLUMNS)) {
+    if (!live[table]) { missing.push(table); continue; }
+    for (const column of columns)
+      if (!definesColumn(live[table], column)) missing.push(table + '.' + column);
+  }
 
   const upToDate =
     probe && probe.tables >= EXPECTED_TABLES &&
-    probe.users_sql && probe.users_sql.includes("'supervisor'") &&
-    probe.cars_sql && probe.cars_sql.includes('plate_letters');
+    missing.length === 0 &&
+    live.users && live.users.includes("'supervisor'");
 
   if (upToDate) return;    // المخطط موجود ومحدّث — لا داعي لإعادة العمل
+
+  if (missing.length)
+    console.log('[ترقية] ناقص في القاعدة: ' + missing.slice(0, 8).join(' · ') +
+                (missing.length > 8 ? ' …' : ''));
 
   await sql.exec(SCHEMA);
   await migrateRoles();
