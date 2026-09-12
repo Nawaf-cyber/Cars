@@ -208,15 +208,20 @@ router.post('/preview', P.needs('cars.import'), upload.single('file'), async (re
     // نحفظ الصفوف المقروءة في القاعدة لا الملف على القرص، فيجدها التنفيذ
     // مهما كانت النسخة التي تستقبل الطلب التالي.
     const token = crypto.randomBytes(16).toString('hex');
+
+    /* الوقت صراحةً لا من افتراضي الجدول: القواعد التي أُنشئت قبل تصحيح
+       التوقيت ما زالت تكتب UTC، والمهلة أدناه تُحسب بتوقيت الرياض. فرق
+       الساعات الثلاث يتجاوز نافذة الساعتين، فكان الصفّ يُحذف بعد ثانية
+       من كتابته ويقول التنفيذُ "انتهت صلاحية الملف" فور رفعه. */
     await db.prepare(
-      'INSERT INTO import_staging (token, filename, sheet, rows_json, user_id) VALUES (?,?,?,?,?)'
+      'INSERT INTO import_staging (token, filename, sheet, rows_json, user_id, created_at) VALUES (?,?,?,?,?,?)'
     ).run(token, String(req.file.originalname || 'file.xlsx'), sheetName,
-          JSON.stringify(rows), req.user.id);
+          JSON.stringify(rows), req.user.id, U.now());
     fs.rmSync(req.file.path, { force: true });
 
-    // تنظيف ما مضى عليه أكثر من ساعتين
-    await db.prepare(
-      "DELETE FROM import_staging WHERE created_at < datetime('now','+3 hours','-2 hours')").run();
+    // تنظيف ما مضى عليه أكثر من ساعتين — بنفس الساعة التي كُتب بها
+    await db.prepare('DELETE FROM import_staging WHERE created_at < ?')
+      .run(U.hoursAgo(2));
 
     res.json({
       token,
@@ -316,8 +321,9 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
     return s.id;
   }
 
-  const batchInfo = (await db.prepare('INSERT INTO import_batches (filename, rows_total, created_by) VALUES (?,?,?)')
-    .run(String(b.filename || found), dataRows.length, req.user.id));
+  const batchInfo = (await db.prepare(
+    'INSERT INTO import_batches (filename, rows_total, created_by, created_at) VALUES (?,?,?,?)')
+    .run(String(b.filename || found), dataRows.length, req.user.id, U.now()));
   const batchId = Number(batchInfo.lastInsertRowid);
 
 

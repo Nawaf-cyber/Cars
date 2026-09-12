@@ -182,11 +182,25 @@ function blankIfPlaceholder(v) {
  * الافتراضية تُحسب على خادم القاعدة (خارج السعودية)، و"CREATE TABLE IF NOT
  * EXISTS" لا يعدّل جدولاً موجوداً — فتصحيح المخطط وحده لا يصلح قاعدة تعمل.
  */
-function now() {
-  const d = new Date();
+function stamp(d) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
          `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function now() {
+  return stamp(new Date());
+}
+
+/**
+ * الوقت قبل عدد ساعات، بنفس صيغة now().
+ *
+ * تُستعمل للمهل: لا تقارن قيمةً كتبتَها من جافاسكربت بحدٍّ تحسبه القاعدة،
+ * فقد تختلف ساعتاهما. المهلة الوحيدة التي فعلت ذلك كانت تُنهي صلاحية
+ * ملف الاستيراد بعد ثانية من رفعه.
+ */
+function hoursAgo(h) {
+  return stamp(new Date(Date.now() - h * 3600000));
 }
 
 function today() {
@@ -221,5 +235,5 @@ module.exports = {
   PLACEHOLDERS, blankIfPlaceholder,
   RESULT_CODES, RESULT_MAP, CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
   CHARGE_KINDS, CHARGE_STATUSES, CAR_STATES,
-  today, now, isValidDate, parseDate,
+  today, now, hoursAgo, isValidDate, parseDate,
 };

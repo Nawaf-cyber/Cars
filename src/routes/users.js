@@ -3,6 +3,7 @@ const express = require('express');
 const db = require('../db');
 const A = require('../auth');
 const P = require('../permissions');
+const U = require('../util');
 
 const router = express.Router();
 
@@ -98,8 +99,8 @@ router.post('/', P.needs('employees.add'), async (req, res) => {
   if (limit) return res.status(402).json({ error: limit, limit_reached: true });
 
   const info = (await db.prepare(
-    'INSERT INTO users (emp_code, name, username, password_hash, role, phone, max_cars) VALUES (?,?,?,?,?,?,?)'
-  ).run(code, name, username, A.hashPassword(password), role, phone, maxCars));
+    'INSERT INTO users (emp_code, name, username, password_hash, role, phone, max_cars, created_at) VALUES (?,?,?,?,?,?,?,?)'
+  ).run(code, name, username, A.hashPassword(password), role, phone, maxCars, U.now()));
 
   A.audit(req.user.id, 'إضافة موظف', 'users', Number(info.lastInsertRowid), { name, username, role });
   res.status(201).json({ id: Number(info.lastInsertRowid), emp_code: code });
