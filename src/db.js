@@ -81,7 +81,7 @@ async function migrateRoles() {
 /** أعمدة اللوحة المفصولة + إعادة احتساب المفاتيح بالصيغة الجديدة. */
 async function migrateCars() {
   const cols = new Set((await sql.prepare('PRAGMA table_info(cars)').all()).map((c) => c.name));
-  for (const name of ['plate_letters', 'plate_digits'])
+  for (const name of ['plate_letters', 'plate_digits', 'car_state'])
     if (!cols.has(name)) await sql.exec(`ALTER TABLE cars ADD COLUMN ${name} TEXT`);
 
   const pending = await sql.prepare(

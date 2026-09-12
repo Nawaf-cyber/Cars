@@ -402,6 +402,7 @@ async function loadCars() {
   Object.assign(S.cars, { total: d.total, pages: d.pages });
   const canAssign = cap('cars.assign');
   const showArrears = cap('charges.view');
+  const canState = cap('cars.set_state');
   const cols = 12 + (canAssign ? 1 : 0) + (showArrears ? 1 : 0);
 
   if (!d.cars.length) {
@@ -430,12 +431,28 @@ async function loadCars() {
         <td>${c.last_contact_at ? `${dOnly(c.last_contact_at)}<br><small class="muted">${agoLabel(daysAgo)}</small>` : '<span class="muted">لم يتم</span>'}</td>
         <td>${c.promise_date ? `<span class="badge ${late ? 'bad' : 'warn'}">${dOnly(c.promise_date)}</span>` : '—'}</td>
         <td>${c.assigned_name ? esc(c.assigned_name) : '<span class="badge warn">غير مسندة</span>'}</td>
-        <td><button class="btn sm primary" data-open="${c.id}">فتح</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn sm primary" data-open="${c.id}">فتح</button>
+          ${canState ? `<select class="state-pick" data-state="${c.id}" title="حالة السيارة">
+            <option value="">— الحالة —</option>
+            ${S.consts.car_states.map((st) =>
+              `<option value="${esc(st)}" ${c.car_state === st ? 'selected' : ''}>${esc(st)}</option>`).join('')}
+          </select>` : (c.car_state ? `<span class="badge">${esc(c.car_state)}</span>` : '')}
+        </td>
       </tr>`;
     }).join('');
   }
 
-  $$('#cars-body [data-open]').forEach((b) => b.onclick = () => openCar(+b.dataset.open));
+  $('#cars-body [data-open]').forEach((b) => b.onclick = () => openCar(+b.dataset.open));
+  // تغيير الحالة بلا فتح السيارة — الموظف يمرّ على قائمته بسرعة
+  $('#cars-body [data-state]').forEach((sel) => sel.onchange = async () => {
+    const was = sel.dataset.prev ?? '';
+    try {
+      await api(`/cars/${sel.dataset.state}/state`, { method: 'POST', body: { car_state: sel.value } });
+      sel.dataset.prev = sel.value;
+      toast(sel.value ? 'الحالة: ' + sel.value : 'أُزيلت الحالة', 'ok');
+    } catch (e) { sel.value = was; toast(e.message, 'bad'); }
+  });
   $$('#cars-body [data-pick]').forEach((cb) => cb.onchange = () => {
     const id = +cb.dataset.pick;
     cb.checked ? S.selected.add(id) : S.selected.delete(id);
@@ -519,6 +536,7 @@ function renderCar(b, d) {
       ${dcell('مرات التواصل', num(c.contact_count))}
       ${dcell('آخر تواصل', c.last_contact_at ? dOnly(c.last_contact_at) : 'لم يتم')}
       ${dcell('موعد الوعد', c.promise_date ? `<span class="badge ${late ? 'bad' : 'warn'}">${dOnly(c.promise_date)}${late ? ' — متجاوز' : ''}</span>` : '—')}
+      ${c.car_state ? dcell('حالة السيارة', `<span class="badge">${esc(c.car_state)}</span>`) : ''}
       ${dcell('الموظف المسؤول', esc(c.assigned_name || 'غير مسندة'))}
       ${dcell('أضافها', esc(c.added_by_name || '—') + (c.source === 'استيراد' ? ' (استيراد)' : ''))}
     </div>

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS cars (
   ownership_transferred INTEGER NOT NULL DEFAULT 0, -- هل نُقلت الملكية للسائق؟
 
   total_amount   REAL    NOT NULL DEFAULT 0,      -- المبلغ المتأخر المستحق حالياً
+  car_state      TEXT,                            -- مباعة | متوقفة | تحت الإجراء (يحددها الموظف)
   status         TEXT    NOT NULL DEFAULT 'مفتوح' CHECK (status IN ('مفتوح','قيد المتابعة','وعد بالسداد','مسدد','متعذر','منتهي بالتمليك')),
   assigned_to    INTEGER REFERENCES users(id) ON DELETE SET NULL,
   added_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,

@@ -128,11 +128,51 @@ const CHANNELS = ['اتصال', 'واتساب', 'رسالة', 'زيارة'];
 
 // ---------- المتأخرات ----------
 // أنواع المطالبات كما تظهر في كشوف الشركة: مخالفة مواقف، رسوم خدمة، أمانة…
+/* حالة السيارة نفسها — منفصلة عن حالة التحصيل عمداً:
+   سيارة "مباعة" قد يبقى عليها متأخرات، و"مسدد" لا يعني أنها تعمل. */
+const CAR_STATES = ['مباعة', 'متوقفة', 'تحت الإجراء'];
+
 const CHARGE_KINDS = [
   'مخالفة مواقف', 'مخالفة مرورية', 'غرامة', 'رسوم خدمة', 'أمانة', 'بدل', 'أخرى',
 ];
 // متأخر: مستحق ولم يُدفع · مرسل: أُرسلت للسائق وننتظر · تم الدفع: سُدّدت
 const CHARGE_STATUSES = ['متأخر', 'مرسل', 'تم الدفع'];
+
+// ---------- قيم نائبة تعني "فارغ" ----------
+/* كشوف الشركة تكتب "لا يوجد" و"متوقف" مكان الفراغ. لو أخذناها كنصّ حقيقي
+   صارت اسمَ سائقٍ أو رقمَ لوحة، وتصادم صفّان يحملان الكلمة نفسها. */
+const PLACEHOLDER_WORDS = [
+  'لا يوجد', 'لا يوجد رقم', 'لا يوجد رقم معتمد', 'لا يوجد رقم للتواصل',
+  'بدون', 'بدون رقم', 'لا شيء', 'لا',
+  'متوقف', 'متوقفة', 'موقوف', 'واقفة',
+  'غير متوفر', 'غير معروف', 'مجهول',
+  'na', 'n/a', 'null', 'none', '-', '--', '—', '0',
+];
+
+/** يضغط النص للمقارنة: تطبيع الحروف، وحذف المسافات والتشكيل والترقيم. */
+function squeeze(v) {
+  // نطرح المسافات والتشكيل والترقيم بمقارنة الأكواد — أوضح من صنف نمطي
+  const s = normalizeLetters(String(v ?? "")).toLowerCase();
+  let out = "";
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    if (c === 32 || c === 9 || c === 10 || c === 13) continue;   // فراغات
+    if (c >= 0x064B && c <= 0x0652) continue;                    // تشكيل
+    if (c === 0x005F || c === 0x002E || c === 0x002C || c === 0x060C) continue;
+    out += ch;
+  }
+  return out;
+}
+
+// نبني المجموعة بالصيغة المضغوطة نفسها، وإلا لم تطابق "لا يوجد" بعد تطبيع الألف
+const PLACEHOLDERS = new Set(PLACEHOLDER_WORDS.map(squeeze));
+
+/** يعيد '' إن كانت القيمة كلمةً نائبة عن الفراغ، وإلا يعيدها كما هي. */
+function blankIfPlaceholder(v) {
+  const raw = String(v ?? '').trim();
+  if (!raw) return '';
+  return PLACEHOLDERS.has(squeeze(raw)) ? '' : raw;
+}
 
 // ---------- التواريخ ----------
 /**
@@ -178,7 +218,8 @@ function money(n) {
 module.exports = {
   toEnglishDigits, normalizePlate, formatPlate, parsePlate, normalizeLetters,
   PLATE_LETTERS, normalizePhone, toNumber, money,
+  PLACEHOLDERS, blankIfPlaceholder,
   RESULT_CODES, RESULT_MAP, CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
-  CHARGE_KINDS, CHARGE_STATUSES,
+  CHARGE_KINDS, CHARGE_STATUSES, CAR_STATES,
   today, now, isValidDate, parseDate,
 };

@@ -124,6 +124,7 @@ app.get('/api/constants', (req, res) => {
     result_codes: U.RESULT_CODES,
     car_types: U.CAR_TYPES,
     car_statuses: U.CAR_STATUSES,
+    car_states: U.CAR_STATES,
     pay_methods: U.PAY_METHODS,
     channels: U.CHANNELS,
     charge_kinds: U.CHARGE_KINDS,

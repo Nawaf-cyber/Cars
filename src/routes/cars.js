@@ -695,5 +695,25 @@ router.post('/:id/charges/import', P.needs('charges.create'), async (req, res) =
   }
 });
 
+/* ---------- حالة السيارة (مباعة · متوقفة · تحت الإجراء) ----------
+   منفصلة عن حالة التحصيل: سيارة مباعة قد يبقى عليها متأخرات تُتابَع.
+   يحددها الموظف من قائمة بجانب زر "فتح" بلا فتح السيارة أصلاً. */
+router.post('/:id/state', P.needs('cars.set_state'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = (await db.prepare('SELECT id, plate, car_state, assigned_to FROM cars WHERE id=?').get(id));
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+
+  const raw = String((req.body || {}).car_state ?? '').trim();
+  if (raw && !U.CAR_STATES.includes(raw))
+    return res.status(400).json({ error: 'حالة غير معروفة' });
+  const state = raw || null;      // الفراغ يعني "بلا حالة"
+
+  (await db.prepare("UPDATE cars SET car_state=?, updated_at=? WHERE id=?").run(state, U.now(), id));
+  A.audit(req.user.id, 'تحديد حالة سيارة', 'cars', id,
+    { plate: car.plate, من: car.car_state || '—', إلى: state || '—' });
+  res.json({ ok: true, car_state: state });
+});
+
 module.exports = router;
 module.exports.CAR_SELECT = CAR_SELECT;

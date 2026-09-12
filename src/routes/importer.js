@@ -52,6 +52,18 @@ const FIELD_ALIASES = {
   employee:           ['الموظف', 'اسم الموظف', 'المسؤول', 'المحصل', 'employee'],
 };
 
+/**
+ * يقرأ خانة اللوحة. "لا يوجد" و"متوقف" وكل ما لا يحمل أرقاماً ليس لوحة —
+ * نعدّه فراغاً فيُتجاهل صفّه وحده، بدل أن يُستورَد كسيارة بذلك الاسم
+ * وتتصادم صفوفٌ تحمل الكلمة نفسها فيُرفض بعضها بلا سبب مفهوم.
+ */
+function readPlateCell(raw) {
+  const cleaned = U.blankIfPlaceholder(raw);
+  const pp = U.parsePlate(cleaned);
+  if (!pp.digits) return { ...pp, empty: true };   // لا أرقام = ليست لوحة
+  return pp;
+}
+
 function normHeader(s) {
   return U.toEnglishDigits(s).toString().trim().toLowerCase()
     .replace(/[ً-ٰٟ]/g, '')
@@ -162,7 +174,7 @@ router.post('/preview', P.needs('cars.import'), upload.single('file'), async (re
     for (let i = 0; i < dataRows.length; i++) {
       const r = dataRows[i];
       const rowNo = headerIdx + 2 + i;
-      const pp = U.parsePlate(mapping.plate !== undefined ? r[mapping.plate] : '');
+      const pp = readPlateCell(mapping.plate !== undefined ? r[mapping.plate] : '');
       if (pp.empty) { noPlate++; issues.push({ row: rowNo, level: 'خطأ', msg: 'لا يوجد رقم لوحة — سيُتجاهل الصف' }); continue; }
 
       const plate = pp.valid ? pp.plate : U.formatPlate(mapping.plate !== undefined ? r[mapping.plate] : '');
@@ -334,7 +346,7 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
     for (let i = 0; i < dataRows.length; i++) {
       const r = dataRows[i];
       const rowNo = headerIdx + 2 + i;
-      const pp = U.parsePlate(col(r, 'plate'));
+      const pp = readPlateCell(col(r, 'plate'));
       if (pp.empty) { skipped++; log.push({ row: rowNo, action: 'تجاهل', reason: 'لا يوجد رقم لوحة' }); continue; }
       const plate = pp.valid ? pp.plate : U.formatPlate(col(r, 'plate'));
       const key = pp.key;
@@ -372,7 +384,8 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
         ? String(col(r, 'car_type')).trim() : 'نقل عام';
       const ph = U.normalizePhone(col(r, 'driver_phone'));
       const amount = U.money(col(r, 'total_amount'));
-      const driverName = String(col(r, 'driver_name') || '').trim() || null;
+      // "لا يوجد" مكان الاسم تعني فراغاً لا اسماً
+      const driverName = U.blankIfPlaceholder(col(r, 'driver_name')) || null;
       const idNo = String(col(r, 'driver_id_no') || '').trim() || null;
       const contractNo = String(col(r, 'contract_no') || '').trim() || null;
       const resultText = String(col(r, 'result') || '').trim();

@@ -48,6 +48,7 @@ const CAPABILITIES = [
   { key: 'cars.add',           group: 'السيارات',  label: 'إضافة سيارة' },
   { key: 'cars.edit',          group: 'السيارات',  label: 'تعديل بيانات السيارة والمبلغ' },
   { key: 'cars.edit_contact',  group: 'السيارات',  label: 'تصحيح بيانات تواصل السائق' },
+  { key: 'cars.set_state',     group: 'السيارات',  label: 'تحديد حالة السيارة (مباعة · متوقفة · تحت الإجراء)' },
   { key: 'cars.delete',        group: 'السيارات',  label: 'حذف سيارة' },
   { key: 'cars.assign',        group: 'السيارات',  label: 'إسناد السيارات وتوزيعها' },
   { key: 'cars.import',        group: 'السيارات',  label: 'استيراد وتوزيع ملف إكسل' },
@@ -88,7 +89,7 @@ const PLAN_CAPS = new Set(CAPABILITIES.filter((c) => c.plan).map((c) => c.key));
 /** الإعدادات الافتراضية عند أول تشغيل — يعدّلها مشرف الموظفين بعدها كما يشاء. */
 const DEFAULTS = {
   supervisor: [
-    'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',
+    'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
     'cars.assign', 'cars.import',
     'followups.create', 'followups.delete', 'payments.create', 'payments.delete',
     'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
@@ -98,7 +99,7 @@ const DEFAULTS = {
     'settings.manage', 'features.manage',
   ],
   manager: [
-    'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete',
+    'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
     'cars.assign', 'cars.import',
     'followups.create', 'followups.delete', 'payments.create', 'payments.delete',
     'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
@@ -109,14 +110,14 @@ const DEFAULTS = {
   ],
   // مشرف القسم: يراقب بالكامل ولا يعدّل — نقطة البداية، ويضبطها مشرف الموظفين
   deputy: [
-    'cars.view_all', 'cars.edit_contact',
+    'cars.view_all', 'cars.edit_contact', 'cars.set_state',
     'followups.create', 'payments.create',
     'charges.view',
     'employees.view',
     'reports.performance', 'reports.export',
   ],
   employee: [
-    'cars.edit_contact', 'followups.create', 'payments.create',
+    'cars.edit_contact', 'cars.set_state', 'followups.create', 'payments.create',
     'charges.view', 'charges.settle',
     // يصدّر سياراته وحده — الحصر في المسار لا في الواجهة
     'reports.export',
