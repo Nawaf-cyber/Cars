@@ -174,6 +174,25 @@ function blankIfPlaceholder(v) {
   return PLACEHOLDERS.has(squeeze(raw)) ? '' : raw;
 }
 
+// بادئة كانت تُضاف للملاحظات المُرحَّلة من الإكسل قبل وجود عمود source.
+// نزيلها عند العرض فتنظف الصفوف القديمة بلا تعديل بياناتٍ حقيقية.
+const LEGACY_IMPORT_PREFIX = /^\s*مُرحَّل من الإكسل\s*:\s*/;
+
+/**
+ * نصّ "النتيجة" كما يقرؤه الإنسان.
+ *
+ * عندنا المتابعة مركّبة: نتيجة مختارة من قائمة + تفاصيل حرّة. وفي كشوف
+ * الشركة عمودٌ واحد. "أخرى" ليست نتيجة بل خانة "غير ذلك"، فذكرها أمام
+ * التفاصيل حشوٌ يملأ العمود بلا معنى — نعرض التفاصيل وحدها حينئذ.
+ */
+function resultText(code, note) {
+  const clean = String(note ?? '').replace(LEGACY_IMPORT_PREFIX, '').trim();
+  const label = String(code ?? '').trim();
+  if (!clean) return label;
+  if (!label || label === 'أخرى') return clean;
+  return label + ' — ' + clean;
+}
+
 // ---------- التواريخ ----------
 /**
  * الوقت الآن بصيغة القاعدة "YYYY-MM-DD HH:MM:SS".
@@ -232,7 +251,7 @@ function money(n) {
 module.exports = {
   toEnglishDigits, normalizePlate, formatPlate, parsePlate, normalizeLetters,
   PLATE_LETTERS, normalizePhone, toNumber, money,
-  PLACEHOLDERS, blankIfPlaceholder,
+  PLACEHOLDERS, blankIfPlaceholder, resultText,
   RESULT_CODES, RESULT_MAP, CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
   CHARGE_KINDS, CHARGE_STATUSES, CAR_STATES,
   today, now, hoursAgo, isValidDate, parseDate,

@@ -346,9 +346,13 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
         driver_id_no=COALESCE(?,driver_id_no), contract_no=COALESCE(?,contract_no),
         total_amount=?, assigned_to=COALESCE(?,assigned_to), updated_at=datetime('now','+3 hours')
       WHERE id=?`);
+    /* "النتيجة" في الملف تُحفظ كما كتبها الموظف، بلا بادئة.
+       كانت تُسبق بـ"مُرحَّل من الإكسل:" لتمييزها عن عمل الموظفين عند التراجع،
+       فصارت البادئة تظهر في كل تصدير وتلوّث العمود. صار التمييز في العمود
+       source — علامةٌ لا يقرأها المستخدم — والنصّ يبقى نظيفاً. */
     const insertNote = tx.prepare(`
-      INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, channel, created_at)
-      VALUES (?,?,0,'أخرى',?,'اتصال',?)`);
+      INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, channel, source, created_at)
+      VALUES (?,?,0,'أخرى',?,'اتصال','استيراد',?)`);
     for (let i = 0; i < dataRows.length; i++) {
       const r = dataRows[i];
       const rowNo = headerIdx + 2 + i;
@@ -420,7 +424,7 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
         amount, 'مفتوح', assignedTo, req.user.id, batchId, null
       );
       // نقل "النتيجة" القديمة من الإكسل كأول متابعة مؤرَّخة حتى لا تضيع
-      if (resultText) await insertNote.run(Number(info.lastInsertRowid), req.user.id, 'مُرحَّل من الإكسل: ' + resultText, U.now());
+      if (resultText) await insertNote.run(Number(info.lastInsertRowid), req.user.id, resultText, U.now());
       inserted++;
       countAssigned();
     }
@@ -475,10 +479,14 @@ router.delete('/batches/:id', P.needs('cars.import'), async (req, res) => {
   if (withPayments > 0)
     return res.status(400).json({ error: `لا يمكن التراجع: توجد ${withPayments} دفعة مسجّلة على سيارات هذه العملية` });
 
-  // متابعات سجّلها الموظفون بعد الاستيراد (عدا الملاحظات المُرحَّلة من الإكسل نفسه)
+  /* متابعات سجّلها الموظفون بعد الاستيراد — لا الملاحظات المُرحَّلة من الملف.
+     التمييز الآن بالعمود source. والشرط الثاني للصفوف القديمة التي كُتبت
+     قبل وجوده، فهي ما زالت تحمل البادئة النصية. */
   const realFollowUps = (await db.prepare(`
     SELECT COUNT(*) n FROM follow_ups f JOIN cars c ON c.id = f.car_id
-    WHERE c.batch_id = ? AND (f.result_note IS NULL OR f.result_note NOT LIKE 'مُرحَّل من الإكسل:%')`).get(id)).n;
+    WHERE c.batch_id = ?
+      AND (f.source IS NULL OR f.source <> 'استيراد')
+      AND (f.result_note IS NULL OR f.result_note NOT LIKE 'مُرحَّل من الإكسل:%')`).get(id)).n;
   if (realFollowUps > 0)
     return res.status(400).json({
       error: `لا يمكن التراجع: سجّل الموظفون ${realFollowUps} متابعة على سيارات هذه العملية — سيضيع عملهم. احذف السيارات يدوياً إذا كنت متأكداً.`,

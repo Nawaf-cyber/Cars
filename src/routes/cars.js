@@ -142,6 +142,10 @@ router.get('/:id', A.requireAuth, async (req, res) => {
     SELECT f.*, u.name AS user_name, u.emp_code
     FROM follow_ups f LEFT JOIN users u ON u.id = f.user_id
     WHERE f.car_id = ? ORDER BY f.id DESC`).all(id));
+
+  // الصفوف المُرحَّلة قبل وجود عمود source ما زالت تحمل بادئة نصّية — نزيلها
+  // عند العرض بدل تعديل بياناتٍ حقيقية في القاعدة.
+  for (const f of followUps) f.result_note = U.resultText('', f.result_note) || null;
   const payments = (await db.prepare(`
     SELECT p.*, u.name AS user_name
     FROM payments p LEFT JOIN users u ON u.id = p.created_by

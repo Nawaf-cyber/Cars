@@ -203,8 +203,6 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
     WHERE ${scope}
     ORDER BY u.name, c.plate`).all());
 
-  /* "النتيجة" في كشفهم عمود واحد يُكتب فيه ما قاله السائق. عندنا هي متابعة
-     مركّبة: نتيجة مختارة + تفاصيل حرّة. نجمعهما كما يقرؤهما الموظف. */
   const byEmployee = new Map();
   for (const r of rows) {
     const key = r.emp_name || 'غير مسندة';
@@ -216,7 +214,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
       phone: r.driver_phone,
       amount: r.total_amount,
       contacted: r.contacts > 0,
-      result: [r.code, r.note].filter(Boolean).join(' — '),
+      result: U.resultText(r.code, r.note),
     });
   }
 

@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   result_note  TEXT,                              -- إجباري عند "أخرى"
   promise_date TEXT,                              -- تاريخ الوعد بالسداد
   channel      TEXT    NOT NULL DEFAULT 'اتصال',  -- اتصال | واتساب | زيارة | رسالة
+  source       TEXT,                              -- استيراد: مُرحَّلة من ملف، لا عمل موظف
   created_at   TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 CREATE INDEX IF NOT EXISTS idx_fu_car  ON follow_ups(car_id);

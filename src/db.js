@@ -86,9 +86,53 @@ async function init() {
     console.log('[ترقية] ناقص في القاعدة: ' + missing.slice(0, 8).join(' · ') +
                 (missing.length > 8 ? ' …' : ''));
 
-  await sql.exec(SCHEMA);
+  await sql.exec(SCHEMA);                 // ينشئ الجداول الناقصة كاملةً
+  await addMissingColumns(live, missing); // ويضيف الأعمدة للجداول القائمة
   await migrateRoles();
   await migrateCars();
+}
+
+/**
+ * يضيف الأعمدة التي أُضيفت للمخطط بعد إنشاء القاعدة.
+ *
+ * "CREATE TABLE IF NOT EXISTS" لا يلمس جدولاً قائماً، فكل عمود جديد كان
+ * يحتاج ترقيةً مكتوبة بيدنا — وتُنسى. هذه تقرأ تعريف العمود من المخطط
+ * نفسه وتنفّذ ALTER TABLE، فلا يبقى شيء ليُنسى.
+ */
+async function addMissingColumns(live, missing) {
+  for (const entry of missing) {
+    const [table, column] = entry.split('.');
+    if (!column || !live[table]) continue;   // جدول كامل ناقص — أنشأه SCHEMA للتو
+
+    // سطر تعريف العمود كما كُتب في المخطط، بلا القيود التي لا يقبلها ALTER
+    const line = definitionOf(table, column);
+    if (!line) { console.warn('[ترقية] تعذّر إيجاد تعريف ' + entry); continue; }
+
+    try {
+      await sql.exec(`ALTER TABLE ${table} ADD COLUMN ${line}`);
+      console.log('[ترقية] أُضيف العمود ' + entry);
+    } catch (e) {
+      // "duplicate column" يعني أن ترقية أخرى سبقتنا — وهذا مقبول
+      if (!/duplicate column/i.test(e.message))
+        console.error('[تحذير] تعذّرت إضافة ' + entry + ': ' + e.message);
+    }
+  }
+}
+
+/** يستخرج سطر تعريف عمود من المخطط: "car_state TEXT" */
+function definitionOf(table, column) {
+  const table_re = new RegExp('CREATE TABLE IF NOT EXISTS ' + table + '\\s*\\(([\\s\\S]*?)\\n\\);');
+  const body = SCHEMA.match(table_re);
+  if (!body) return null;
+
+  for (const raw of body[1].split('\n')) {
+    const line = raw.trim().replace(/--.*$/, '').trim().replace(/,$/, '');
+    if (!line || !new RegExp('^' + column + '\\s').test(line)) continue;
+    // ALTER TABLE لا يقبل عموداً جديداً بقيد UNIQUE ولا بافتراضي غير ثابت
+    if (/\bUNIQUE\b/i.test(line) || /DEFAULT\s*\(/i.test(line)) return column + ' TEXT';
+    return line;
+  }
+  return null;
 }
 
 /** قيد users.role القديم لا يسمح بالأدوار الجديدة — نعيد بناء الجدول بلا فقد بيانات. */
