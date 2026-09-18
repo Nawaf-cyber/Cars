@@ -62,7 +62,12 @@ const PERM = require('./src/permissions');
   }
 })();
 
-const BUILD = '2026-09-09 19:29';   // بصمة النسخة — تظهر في /api/health
+/* بصمة النسخة الحيّة — تظهر في /api/health.
+   كانت مكتوبة يدوياً فتقادمت، فصار من المستحيل معرفة أي نشرة تعمل فعلاً
+   إلا بتخمين: نبحث عن نصّ من الكود داخل الملفات المنشورة. الاستضافة تمرّر
+   معرّف النشرة في متغيّر بيئة، فنقرأه منه ونحتفظ بالتاريخ محلياً. */
+const BUILD = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) ||
+              new Date().toISOString().slice(0, 16).replace('T', ' ');
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
