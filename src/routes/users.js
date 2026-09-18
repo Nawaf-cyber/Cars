@@ -7,17 +7,15 @@ const U = require('../util');
 
 const router = express.Router();
 
-const RANK = { owner: 4, supervisor: 3, manager: 2, deputy: 1, employee: 0 };
-const PREFIX = { supervisor: 'SUP', manager: 'MGR', deputy: 'DEP', employee: 'EMP' };
-
 /** لا يُنشئ أحد دوراً في رتبته أو أعلى منه، ولا يعدّل من هو أعلى منه. */
-function rankOf(role) { return RANK[role] ?? -1; }
+const rankOf = (role) => P.rankOf(role);
 function outranks(actor, targetRole) {
   return actor.role === 'owner' || rankOf(actor.role) > rankOf(targetRole);
 }
 
 async function nextEmpCode(role) {
-  const pre = PREFIX[role] || 'EMP';
+  // البادئة من تعريف الدور نفسه — فالدور المخصّص يحمل بادئته (HR-001)
+  const pre = P.roleOf(role)?.code_prefix || 'EMP';
   const row = (await db.prepare(
     "SELECT emp_code FROM users WHERE emp_code LIKE ? ORDER BY CAST(substr(emp_code,5) AS INTEGER) DESC LIMIT 1"
   ).get(pre + '-%'));
@@ -36,7 +34,7 @@ router.get('/', P.needs('employees.view'), async (req, res) => {
     FROM users u WHERE ${HIDE_OWNER} ORDER BY u.role DESC, u.name`).all());
   res.json({
     users: rows,
-    role_labels: Object.fromEntries(P.CLIENT_ROLES.map((r) => [r, P.ROLE_LABEL[r]])),
+    role_labels: Object.fromEntries(P.visibleRoles(req.user).map((r) => [r.key, r.label])),
   });
 });
 
@@ -68,9 +66,9 @@ router.post('/', P.needs('employees.add'), async (req, res) => {
   // لا نخفّض الدور بصمت: من طلب دوراً ممنوعاً يجب أن يُخبَر، لا أن يُنشأ
   // له حساب بدور آخر يظنه ما طلب.
   const asked = req.body?.role;
-  if (asked !== undefined && asked !== '' && !P.CLIENT_ROLES.includes(asked))
+  if (asked !== undefined && asked !== '' && !P.clientRoleKeys().includes(asked))
     return res.status(400).json({ error: 'دور غير معروف' });
-  const role = P.CLIENT_ROLES.includes(asked) ? asked : 'employee';
+  const role = P.clientRoleKeys().includes(asked) ? asked : 'employee';
   const phone = String(req.body?.phone || '').trim() || null;
   const maxCars = req.body?.max_cars == null || req.body.max_cars === ''
     ? null : parseInt(req.body.max_cars, 10);
@@ -117,7 +115,7 @@ router.put('/:id', P.needs('employees.edit'), async (req, res) => {
   const name = String(req.body?.name ?? u.name).trim() || u.name;
   const phone = req.body?.phone === undefined ? u.phone : (String(req.body.phone).trim() || null);
   const role = req.body?.role === undefined ? u.role
-    : (P.CLIENT_ROLES.includes(req.body.role) ? req.body.role : u.role);
+    : (P.clientRoleKeys().includes(req.body.role) ? req.body.role : u.role);
   const active = req.body?.active === undefined ? u.active : (req.body.active ? 1 : 0);
   const maxCars = req.body?.max_cars === undefined ? u.max_cars
     : (req.body.max_cars === '' || req.body.max_cars === null ? null : parseInt(req.body.max_cars, 10));

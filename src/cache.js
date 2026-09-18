@@ -16,6 +16,7 @@ const store = {
   settings: {},                 // { key: value }
   license: null,                // صف الترخيص
   permissions: {},              // { role: { capability: 0|1 } }
+  roles: {},                    // { key: { key, label, rank, builtin, hidden, code_prefix } }
   loaded: false,
   loadedAt: 0,
 };
@@ -62,16 +63,25 @@ async function reloadPermissions() {
   store.permissions = out;
 }
 
+/* الأدوار صارت بيانات، وتُقرأ في كل طلب (الرتبة تحكم كل فحص صلاحية).
+   بدون الذاكرة يعني ذلك رحلة شبكة إضافية لكل نقرة موظف. */
+async function reloadRoles() {
+  const rows = await db.prepare(
+    'SELECT key, label, rank, builtin, hidden, code_prefix FROM roles').all();
+  store.roles = Object.fromEntries(rows.map((r) => [r.key, r]));
+}
+
 async function reloadAll() {
-  await Promise.all([reloadSettings(), reloadLicense(), reloadPermissions()]);
+  await Promise.all([reloadSettings(), reloadLicense(), reloadPermissions(), reloadRoles()]);
   store.loaded = true;
   store.loadedAt = Date.now();
 }
 
 module.exports = {
   store, freshen, middleware, TTL_MS,
-  reloadAll, reloadSettings, reloadLicense, reloadPermissions,
+  reloadAll, reloadSettings, reloadLicense, reloadPermissions, reloadRoles,
   settings: () => store.settings,
   license: () => store.license,
   permissions: () => store.permissions,
+  roles: () => store.roles,
 };

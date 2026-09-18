@@ -231,3 +231,38 @@ table.data .empty{text-align:center;color:var(--muted);padding:2.5rem}
   vertical-align: middle;
 }
 .state-pick:hover { border-color: var(--brand, #1b5fa8); }
+
+/* ---------- المسمّيات الوظيفية ---------- */
+/* شرائح بدل أعمدة: مع ثمانية أدوار تصير الشبكة عريضة لا تُقرأ على الجوال */
+.role-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+.role-chip {
+  display: flex; flex-direction: column; gap: .15rem;
+  padding: .55rem .9rem; border: 1px solid var(--line, #dde3ee);
+  background: #fff; border-radius: 10px; cursor: pointer; text-align: right;
+  font-family: inherit; transition: border-color .12s, background .12s;
+}
+.role-chip:hover { border-color: var(--brand, #1b5fa8); }
+.role-chip.on { border-color: var(--brand, #1b5fa8); background: #eef4fc; }
+.role-chip.on .rc-label { color: var(--brand, #1b5fa8); }
+.role-chip.ro { opacity: .7; }
+.rc-label { font-weight: 700; font-size: .95rem; }
+.rc-meta  { font-size: .75rem; color: var(--muted, #829ab1); }
+
+/* مفاتيح الدور: صفوف لا خلايا جدول */
+.perm-group-box { margin-bottom: 1rem; border: 1px solid var(--line, #dde3ee); border-radius: 10px; overflow: hidden; }
+.perm-group-head {
+  background: #f4f7fb; padding: .5rem .8rem;
+  font-weight: 700; font-size: .9rem; color: var(--brand, #1b5fa8);
+}
+.perm-row {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .55rem .8rem; border-top: 1px solid #eef2f7;
+  cursor: pointer; font-size: .92rem;
+}
+.perm-row:hover { background: #fafcff; }
+/* width:auto ضروري — القاعدة العامة تجعل عرض كل حقل 100% فيبتلع السطر */
+.perm-row input { margin: 0; flex: none; width: auto; }
+/* بلا هذا ينضغط النص إلى عرض بضعة بكسلات فلا يُقرأ */
+.perm-row > span { flex: 1 1 auto; min-width: 0; }
+.perm-row.perm-locked { opacity: .55; cursor: not-allowed; }
+.perm-row.perm-dirty { background: #fff8e6; }

@@ -78,7 +78,9 @@ async function init() {
   const upToDate =
     probe && probe.tables >= EXPECTED_TABLES &&
     missing.length === 0 &&
-    live.users && live.users.includes("'supervisor'");
+    live.users && live.users.includes("'supervisor'") &&
+    // قيد الدور يجب أن يكون قد أُزيل — وإلا أُعيدت الترقية ولو بدت الجداول كاملة
+    !/CHECK\s*\(\s*role\s+IN/i.test(live.users);
 
   if (upToDate) return;    // المخطط موجود ومحدّث — لا داعي لإعادة العمل
 
@@ -89,6 +91,8 @@ async function init() {
   await sql.exec(SCHEMA);                 // ينشئ الجداول الناقصة كاملةً
   await addMissingColumns(live, missing); // ويضيف الأعمدة للجداول القائمة
   await migrateRoles();
+  await migrateOpenRoles();               // يفتح الدور للأدوار المخصّصة
+  await seedRoles();
   await migrateCars();
 }
 
@@ -167,6 +171,77 @@ async function migrateRoles() {
     await sql.exec('PRAGMA legacy_alter_table = OFF');
     await sql.exec('PRAGMA foreign_keys = ON');
   }
+}
+
+/**
+ * يفتح جدول المستخدمين للأدوار المخصّصة.
+ *
+ * قيد CHECK يحصر الدور في خمسة أسماء مكتوبة في المخطط، فلا يقبل دوراً
+ * تنشئه الشركة. إزالته تعني إعادة بناء الجدول — وهو أخطر ما في هذه الميزة
+ * لأنه يعمل على قاعدة فيها حسابات حقيقية. لذلك:
+ *   نعدّ الصفوف قبل، وننقلها، ونعدّها بعد، ولا نحذف القديم إلا إن تطابق العدد.
+ * وإن اختلّ شيء يبقى الجدول الأصلي مكانه ويُرفع الخطأ بلا فقد صفّ واحد.
+ */
+async function migrateOpenRoles() {
+  const row = await sql.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (!row || !/CHECK\s*\(\s*role\s+IN/i.test(row.sql)) return;   // مفتوح أصلاً
+
+  const before = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
+
+  await sql.exec('PRAGMA foreign_keys = OFF');
+  await sql.exec('PRAGMA legacy_alter_table = ON');
+  try {
+    await sql.exec('DROP TABLE IF EXISTS users_open');
+    await sql.exec(`
+      CREATE TABLE users_open (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        emp_code      TEXT    NOT NULL UNIQUE,
+        name          TEXT    NOT NULL,
+        username      TEXT    NOT NULL UNIQUE,
+        password_hash TEXT    NOT NULL,
+        role          TEXT    NOT NULL,
+        phone         TEXT,
+        max_cars      INTEGER,
+        active        INTEGER NOT NULL DEFAULT 1,
+        created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+      )`);
+    await sql.exec(`
+      INSERT INTO users_open (id, emp_code, name, username, password_hash, role, phone, max_cars, active, created_at)
+        SELECT id, emp_code, name, username, password_hash, role, phone, max_cars, active, created_at FROM users`);
+
+    const moved = (await sql.prepare('SELECT COUNT(*) n FROM users_open').get()).n;
+    if (Number(moved) !== Number(before)) {
+      await sql.exec('DROP TABLE users_open');
+      throw new Error(`نقل ناقص: ${before} حساباً صارت ${moved} — أُلغيت الترقية والجدول الأصلي سليم`);
+    }
+
+    await sql.exec('DROP TABLE users');
+    await sql.exec('ALTER TABLE users_open RENAME TO users');
+
+    const after = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
+    console.log(`[ترقية] الأدوار صارت مفتوحة — ${after} حساباً سليمة.`);
+  } finally {
+    await sql.exec('PRAGMA legacy_alter_table = OFF');
+    await sql.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+/** يزرع الأدوار الخمسة الأصلية مرة واحدة، ولا يلمس ما سُمّي أو أُضيف بعدها. */
+async function seedRoles() {
+  const BUILTIN = [
+    ['owner',      'مالك النظام',   4, 'OWN', 1],
+    ['supervisor', 'مشرف موظفين',   3, 'SUP', 0],
+    ['manager',    'مدير الشركة',   2, 'MGR', 0],
+    ['deputy',     'مشرف قسم',      1, 'DEP', 0],
+    ['employee',   'موظف',          0, 'EMP', 0],
+  ];
+  const ins = sql.prepare(`
+    INSERT INTO roles (key, label, rank, builtin, hidden, code_prefix, created_at)
+    VALUES (?,?,?,1,?,?,?) ON CONFLICT(key) DO NOTHING`);
+  const now = require('./util').now();
+  for (const [key, label, rank, prefix, hidden] of BUILTIN)
+    await ins.run(key, label, rank, hidden, prefix, now);
 }
 
 /** أعمدة اللوحة المفصولة + إعادة احتساب المفاتيح بالصيغة الجديدة. */

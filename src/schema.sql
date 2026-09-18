@@ -136,6 +136,30 @@ CREATE TABLE IF NOT EXISTS license_payments (
   created_at TEXT NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
+-- ============================================================================
+-- الأدوار — بيانات لا كود، فتستطيع كل شركة مسمياتها الخاصة
+-- ----------------------------------------------------------------------------
+-- rank هو السُّلَّم، ويحكم ثلاثة أشياء معاً: من يُنشئ من، ومن يرى من في سجل
+-- النشاط، ومن يعدّل حساب من. لا أحد يُنشئ دوراً في رتبته أو أعلى — وهذا
+-- جدار أمني لا تفصيل: لولاه لأنشأ مديرُ الشركة دوراً فوق نفسه وأسند نفسه
+-- إليه، فصار فوق مالك النظام عملياً.
+--
+-- hidden: المالك وحده. لا يظهر في قائمة أدوار، ولا في عدّاد، ولا في اختيار.
+-- builtin: الخمسة الأصلية — تُعاد تسميتها ولا تُحذف، فالنظام يستند إليها.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS roles (
+  key         TEXT    PRIMARY KEY,           -- owner | manager | hr_a1b2…
+  label       TEXT    NOT NULL,              -- المسمّى كما يراه الناس
+  rank        INTEGER NOT NULL,              -- الموضع في السُّلَّم
+  builtin     INTEGER NOT NULL DEFAULT 0,
+  hidden      INTEGER NOT NULL DEFAULT 0,
+  code_prefix TEXT,                          -- بادئة رقم الموظف: HR-001
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_roles_rank ON roles(rank);
+
 -- ---------- الصلاحيات كمفاتيح تُشغَّل وتُطفَأ ----------
 -- بدل تثبيت صلاحيات كل دور في الكود، تُخزَّن هنا ويغيّرها مشرف الموظفين بضغطة.
 CREATE TABLE IF NOT EXISTS role_permissions (

@@ -1597,7 +1597,12 @@ $('#settings-form').onsubmit = async (e) => {
 /* ============================================================
    شاشة الصلاحيات — المفاتيح
    ============================================================ */
-let permPending = {};   // {دور: {قدرة: 0|1}} في انتظار الحفظ
+/* ---------------- الأدوار والصلاحيات ----------------
+   دور واحد في كل مرة لا شبكة: مع ثمانية أدوار تصير الشبكة عريضة لا تُقرأ
+   على جوال، وهو الجهاز الذي يفتح منه الموظف. */
+let permPending = {};
+let permRole = null;      // الدور المعروض حالياً
+let permData = null;      // آخر ردّ من الخادم
 
 async function loadPermissions() {
   const box = $('#perm-body');
@@ -1605,50 +1610,171 @@ async function loadPermissions() {
   permPending = {};
   $('#perm-save').disabled = true;
 
-  let d;
-  try { d = await api('/admin/permissions'); }
+  try { permData = await api('/admin/permissions'); }
   catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
 
-  const locked = new Set(d.locked || []);
+  const editable = permData.roles.filter((r) => r.editable);
+  if (!permRole || !editable.some((r) => r.key === permRole))
+    permRole = editable[0]?.key || permData.roles[0]?.key || null;
+
+  renderRolesPanel();
+  renderPermTable();
+}
+
+/* ----- قائمة الأدوار: إنشاء وتسمية وحذف ----- */
+function renderRolesPanel() {
+  const host = $('#roles-panel');
+  if (!host) return;
+  const canManage = cap('roles.manage');
+
+  host.innerHTML = `
+    <div class="row between wrap" style="margin-bottom:.6rem">
+      <h3 style="margin:0">المسمّيات الوظيفية</h3>
+      ${canManage ? '<button class="btn primary" id="role-add">+ مسمّى جديد</button>' : ''}
+    </div>
+    <div class="role-chips">
+      ${permData.roles.map((r) => `
+        <button class="role-chip ${r.key === permRole ? 'on' : ''} ${r.editable ? '' : 'ro'}"
+                data-role="${esc(r.key)}">
+          <span class="rc-label">${esc(r.label)}</span>
+          <span class="rc-meta">${num(r.users)} مستخدم${r.editable ? '' : ' · للقراءة'}</span>
+        </button>`).join('')}
+    </div>`;
+
+  $$('#roles-panel [data-role]').forEach((b) => b.onclick = () => {
+    if (Object.keys(permPending).length &&
+        !confirm('لديك تغييرات غير محفوظة — هل تتركها؟')) return;
+    permPending = {};
+    permRole = b.dataset.role;
+    renderRolesPanel();
+    renderPermTable();
+  });
+
+  const add = $('#role-add');
+  if (add) add.onclick = roleForm;
+}
+
+/* ----- مفاتيح الدور المعروض ----- */
+function renderPermTable() {
+  const box = $('#perm-body');
+  const role = permData.roles.find((r) => r.key === permRole);
+  if (!role) { box.innerHTML = '<p class="muted">لا يوجد دور لعرضه.</p>'; return; }
+
+  const locked = new Set(permData.locked || []);
   const groups = [];
-  for (const c of d.capabilities) {
+  for (const c of permData.capabilities) {
     let g = groups.find((x) => x.name === c.group);
     if (!g) groups.push(g = { name: c.group, caps: [] });
     g.caps.push(c);
   }
 
-  const head = d.roles.map((r) => `<th class="perm-role ${r.editable ? '' : 'ro'}">
-      ${esc(r.label)}<br><small class="muted">${num(r.users)} مستخدم${r.editable ? '' : ' · للقراءة'}</small>
-    </th>`).join('');
+  const on = permData.matrix[role.key] || {};
+  const count = permData.capabilities.filter((c) => on[c.key]).length;
 
   box.innerHTML = `
-    ${locked.size ? `<div class="alert warn">صلاحيات معطّلة لأن الميزة غير مشمولة في الباقة الحالية —
-      تظهر رمادية ولا تعمل حتى لو شُغِّلت.</div>` : ''}
-    <div class="table-wrap"><table class="data perm-table">
-      <thead><tr><th style="min-width:280px">الصلاحية</th>${head}</tr></thead>
-      <tbody>
-        ${groups.map((g) => `
-          <tr class="perm-group"><td colspan="${d.roles.length + 1}">${esc(g.name)}</td></tr>
-          ${g.caps.map((c) => {
-            const off = locked.has(c.key);
-            return `<tr class="${off ? 'perm-locked' : ''}">
-              <td style="white-space:normal">${esc(c.label)}
-                ${off ? '<span class="badge warn">تحتاج ترقية الباقة</span>' : ''}</td>
-              ${d.roles.map((r) => `<td class="perm-cell">
-                <input type="checkbox" data-role="${r.key}" data-capk="${esc(c.key)}"
-                  ${d.matrix[r.key]?.[c.key] ? 'checked' : ''}
-                  ${r.editable && !off ? '' : 'disabled'}>
-              </td>`).join('')}
-            </tr>`;
-          }).join('')}`).join('')}
-      </tbody>
-    </table></div>`;
+    <div class="row between wrap" style="margin-bottom:.8rem">
+      <div>
+        <b style="font-size:1.05rem">${esc(role.label)}</b>
+        <span class="muted"> — ${num(count)} من ${num(permData.capabilities.length)} مفتاحاً مشغّل</span>
+      </div>
+      ${role.editable && cap('roles.manage') && !role.builtin
+        ? `<span><button class="btn sm" id="role-rename">إعادة تسمية</button>
+           <button class="btn sm danger" id="role-del">حذف</button></span>`
+        : (role.editable && cap('roles.manage')
+            ? '<button class="btn sm" id="role-rename">إعادة تسمية</button>' : '')}
+    </div>
 
-  $$('#perm-body input[data-role]').forEach((cb) => cb.onchange = () => {
-    (permPending[cb.dataset.role] ||= {})[cb.dataset.capk] = cb.checked ? 1 : 0;
-    cb.closest('td').classList.add('perm-dirty');
+    ${!role.editable ? '<div class="alert info">هذا دورك أو دور أعلى — للقراءة فقط.</div>' : ''}
+    ${locked.size ? `<div class="alert warn">مفاتيح رمادية = ميزة غير مشمولة في الباقة، لا تعمل ولو شُغِّلت.</div>` : ''}
+
+    ${groups.map((g) => `
+      <div class="perm-group-box">
+        <div class="perm-group-head">${esc(g.name)}</div>
+        ${g.caps.map((c) => {
+          const off = locked.has(c.key);
+          return `<label class="perm-row ${off ? 'perm-locked' : ''}">
+            <input type="checkbox" data-capk="${esc(c.key)}"
+              ${on[c.key] ? 'checked' : ''} ${role.editable && !off ? '' : 'disabled'}>
+            <span>${esc(c.label)}${off ? ' <span class="badge warn">تحتاج ترقية الباقة</span>' : ''}</span>
+          </label>`;
+        }).join('')}
+      </div>`).join('')}`;
+
+  $$('#perm-body input[data-capk]').forEach((cb) => cb.onchange = () => {
+    (permPending[role.key] ||= {})[cb.dataset.capk] = cb.checked ? 1 : 0;
+    cb.closest('.perm-row').classList.add('perm-dirty');
     $('#perm-save').disabled = false;
   });
+
+  const ren = $('#role-rename');
+  if (ren) ren.onclick = () => roleForm(role);
+  const del = $('#role-del');
+  if (del) del.onclick = () => confirmBox(
+    `حذف المسمّى "${role.label}"؟ لا يُحذف إن كان عليه حسابات.`,
+    async () => {
+      try {
+        await api('/roles/' + role.key, { method: 'DELETE' });
+        toast('حُذف المسمّى', 'ok');
+        permRole = null;
+        loadPermissions();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+}
+
+/* ----- نموذج إنشاء/تسمية ----- */
+async function roleForm(existing) {
+  let d;
+  try { d = await api('/roles'); }
+  catch (e) { return toast(e.message, 'bad'); }
+
+  const isNew = !existing;
+  const b = openModal(isNew ? 'مسمّى وظيفي جديد' : 'إعادة تسمية', `
+    <form id="role-form">
+      <label>المسمّى *
+        <input name="label" value="${esc(existing?.label || '')}" required
+               placeholder="مثال: موارد بشرية" maxlength="40"></label>
+
+      ${isNew || !existing.builtin ? `
+        <label>الموضع في السُّلَّم
+          <select name="rank">
+            ${d.levels.map((l) => `<option value="${l.rank}"
+              ${existing?.rank === l.rank ? 'selected' : ''}>بمستوى ${esc(l.beside)}</option>`).join('')}
+          </select>
+          <small class="muted">يحدّد من يستطيع إنشاءه ومن يراه. لا يمكن وضعه في مستواك أو أعلى.</small>
+        </label>` : ''}
+
+      ${isNew ? `
+        <label>بادئة رقم الموظف
+          <input name="code_prefix" placeholder="HR" maxlength="4" style="max-width:120px">
+          <small class="muted">تظهر في أرقام الموظفين: HR-001</small></label>
+
+        <label>ابدأ بصلاحيات
+          <select name="copy_from">
+            <option value="">— كل المفاتيح مطفأة —</option>
+            ${d.roles.filter((r) => r.editable || r.key === permRole)
+              .map((r) => `<option value="${esc(r.key)}">نسخة من ${esc(r.label)}</option>`).join('')}
+          </select>
+          <small class="muted">تُنسخ صلاحياتك أنت منها فقط — لا يرث ما لا تملكه.</small></label>` : ''}
+
+      <div class="modal-actions"><button class="btn primary">${isNew ? 'إنشاء' : 'حفظ'}</button></div>
+    </form>`);
+
+  $('#role-form', b).onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target));
+    try {
+      if (isNew) {
+        const r = await api('/roles', { method: 'POST', body: fd });
+        toast('أُنشئ المسمّى — شغّل مفاتيحه الآن', 'ok');
+        permRole = r.key;
+      } else {
+        await api('/roles/' + existing.key, { method: 'PUT', body: fd });
+        toast('تم الحفظ', 'ok');
+      }
+      closeModal();
+      loadPermissions();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  };
 }
 
 $('#perm-save').onclick = async () => {
@@ -1660,7 +1786,8 @@ $('#perm-save').onclick = async () => {
       const r = await api('/admin/permissions/' + role, { method: 'PUT', body: { changes } });
       n += r.changed;
     }
-    toast(`تم حفظ ${n} صلاحية — سارية الآن`, 'ok');
+    permPending = {};
+    toast(`تم حفظ ${n} مفتاحاً — سارية الآن`, 'ok');
     // قد يكون غيّر صلاحيات دوره غير مباشرة، فنحدّث قدراتنا
     const me = await api('/auth/me');
     S.user = me.user;

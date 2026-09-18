@@ -120,7 +120,7 @@ function publicUser(u) {
     name: u.name,
     emp_code: u.emp_code,
     username: u.username,
-    role_label: u.role === 'employee' ? `موظف — ${u.emp_code}` : P.ROLE_LABEL[u.role],
+    role_label: u.role === 'employee' ? `موظف — ${u.emp_code}` : P.labelOf(u.role),
     can_manage: isManagerLevel(u),
     caps: P.capsOf(u),                       // ما يستطيعه فعلاً — الواجهة تخفي الباقي
     assignable_roles: P.assignableRoles(u),  // لا تُعرض له أدوار أعلى منه

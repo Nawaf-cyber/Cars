@@ -172,8 +172,10 @@ router.get('/performance/:id', P.needs('reports.performance'), async (req, res) 
  */
 router.get('/audit', P.needs('reports.audit'), async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-  const myRank = P.RANK[req.user.role] ?? -1;
-  const visible = Object.keys(P.RANK).filter((r) => P.RANK[r] <= myRank);
+  // كلٌّ يرى رتبته فأدنى — والأدوار بيانات الآن فالقائمة تتبع الجدول
+  const myRank = P.rankOf(req.user.role);
+  const visible = Object.values(P.allRoles())
+    .filter((r) => r.rank <= myRank).map((r) => r.key);
 
   const rows = (await db.prepare(`
     SELECT a.*, u.name AS user_name

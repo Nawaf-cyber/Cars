@@ -7,39 +7,49 @@ const P = require('../permissions');
 const router = express.Router();
 
 /* ---------- شاشة المفاتيح: تشغيل وإطفاء صلاحيات الأدوار ---------- */
-router.get('/permissions', P.needs('features.manage'), async (req, res) => {
-  const rank = { owner: 4, supervisor: 3, manager: 2, deputy: 1, employee: 0 };
-  const myRank = rank[req.user.role] ?? -1;
+/* من يملك features.manage يضبط المفاتيح، ومن يملك roles.manage يضبط
+   مفاتيح الأدوار التي أنشأها — وإلا أنشأ دوراً ولا يستطيع تشغيل شيء فيه.
+   الأمان محفوظ بالجدارين داخل setRolePermissions لا بحجب الشاشة. */
+const canTunePermissions = (req, res, next) =>
+  (P.can(req.user, 'features.manage') || P.can(req.user, 'roles.manage'))
+    ? next()
+    : res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+
+router.get('/permissions', canTunePermissions, async (req, res) => {
+  const myRank = P.rankOf(req.user.role);
 
   const roles = [];
-  for (const r of P.CLIENT_ROLES) {
-    const count = await db.prepare('SELECT COUNT(*) n FROM users WHERE role=? AND active=1').get(r);
+  for (const r of P.visibleRoles(req.user)) {
+    const count = await db.prepare('SELECT COUNT(*) n FROM users WHERE role=? AND active=1').get(r.key);
     roles.push({
-      key: r,
-      label: P.ROLE_LABEL[r],
+      key: r.key,
+      label: r.label,
+      rank: r.rank,
+      builtin: !!r.builtin,
       // لا أحد يعدّل صلاحيات دوره أو دور أعلى منه
-      editable: req.user.role === 'owner' || rank[r] < myRank,
+      editable: req.user.role === 'owner' || r.rank < myRank,
       users: count.n,
     });
   }
 
   res.json({
-    capabilities: P.CAPABILITIES,
+    // القدرات التي يملكها هو فقط — فلا يرى مفاتيح الاشتراك والربط ولا يعرف بها
+    capabilities: P.visibleCapabilities(req.user),
     roles,
-    matrix: P.matrix(),
+    matrix: P.matrix(req.user),
     plan_features: P.planFeatures(),
     locked: [...P.PLAN_CAPS].filter((c) => !P.planAllows(c)),
   });
 });
 
-router.put('/permissions/:role', P.needs('features.manage'), async (req, res) => {
+router.put('/permissions/:role', canTunePermissions, async (req, res) => {
   try {
-    const n = await P.setRolePermissions(req.params.role, req.body?.changes || {}, req.user.role);
+    const n = await P.setRolePermissions(req.params.role, req.body?.changes || {}, req.user);
     A.audit(req.user.id, 'تعديل صلاحيات دور', 'role_permissions', null,
       { role: req.params.role, changed: n });
-    res.json({ ok: true, changed: n, matrix: P.matrix() });
+    res.json({ ok: true, changed: n, matrix: P.matrix(req.user) });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, changed: e.partial ?? 0 });
   }
 });
 
