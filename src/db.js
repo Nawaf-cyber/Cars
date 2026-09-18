@@ -44,6 +44,18 @@ function definesColumn(tableSql, column) {
   return new RegExp('[(,\\s]' + column + '\\s').test(tableSql);
 }
 
+/**
+ * PRAGMA اختياري: ما يقبله ملفٌ محلي قد ترفضه القاعدة المستضافة.
+ *
+ * "PRAGMA legacy_alter_table" مرفوضة على Turso، وكانت تُسقط الترقية فتفشل
+ * init() فيرفض النظام كلَّ طلب — تعطّل كامل من تعليمة تحسينية لا أكثر.
+ * ما يلزم للصحة يُنفَّذ صراحةً؛ وهذه تُحاوَل وتُتجاهَل إن رُفضت.
+ */
+async function tryPragma(stmt) {
+  try { await sql.exec(stmt); return true; }
+  catch (e) { return false; }
+}
+
 async function init() {
   if (!sql.isRemote) {
     // إعدادات تخص الملف المحلي فقط
@@ -145,8 +157,8 @@ async function migrateRoles() {
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
   if (!row || row.sql.includes("'supervisor'")) return;
 
-  await sql.exec('PRAGMA foreign_keys = OFF');
-  await sql.exec('PRAGMA legacy_alter_table = ON');
+  await tryPragma('PRAGMA foreign_keys = OFF');
+  await tryPragma('PRAGMA legacy_alter_table = ON');
   try {
     await sql.exec(`
       CREATE TABLE users_new (
@@ -168,7 +180,7 @@ async function migrateRoles() {
     `);
     console.log('[ترقية] تم توسيع الأدوار: مشرف الموظفين ومشرف القسم.');
   } finally {
-    await sql.exec('PRAGMA legacy_alter_table = OFF');
+    await tryPragma('PRAGMA legacy_alter_table = OFF');
     await sql.exec('PRAGMA foreign_keys = ON');
   }
 }
@@ -189,8 +201,8 @@ async function migrateOpenRoles() {
 
   const before = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
 
-  await sql.exec('PRAGMA foreign_keys = OFF');
-  await sql.exec('PRAGMA legacy_alter_table = ON');
+  await tryPragma('PRAGMA foreign_keys = OFF');
+  await tryPragma('PRAGMA legacy_alter_table = ON');
   try {
     await sql.exec('DROP TABLE IF EXISTS users_open');
     await sql.exec(`
@@ -222,7 +234,7 @@ async function migrateOpenRoles() {
     const after = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
     console.log(`[ترقية] الأدوار صارت مفتوحة — ${after} حساباً سليمة.`);
   } finally {
-    await sql.exec('PRAGMA legacy_alter_table = OFF');
+    await tryPragma('PRAGMA legacy_alter_table = OFF');
     await sql.exec('PRAGMA foreign_keys = ON');
   }
 }

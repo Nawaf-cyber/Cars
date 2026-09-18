@@ -394,7 +394,13 @@ function ready() {
     await db.init();
     await require('./src/cache').reloadAll();
     await bootstrap();
-  })();
+  })().catch((e) => {
+    /* الفشل لا يُحفظ: نسخة أقلعت وفشلت — لانقطاع شبكة أو خلل صُحّح بعدها —
+       كانت تحتفظ بذلك الفشل فترفض كل طلب حتى تُستبدل، والنظام سليم أصلاً.
+       نمسح الوعد فتُعاد المحاولة مع الطلب التالي. */
+    readyPromise = null;
+    throw e;
+  });
   return readyPromise;
 }
 
