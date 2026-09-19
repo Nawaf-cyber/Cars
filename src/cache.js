@@ -17,6 +17,7 @@ const store = {
   license: null,                // صف الترخيص
   permissions: {},              // { role: { capability: 0|1 } }
   roles: {},                    // { key: { key, label, rank, builtin, hidden, code_prefix } }
+  results: [],                  // نتائج المتابعة مرتّبة — تُقرأ مع كل متابعة
   loaded: false,
   loadedAt: 0,
 };
@@ -71,17 +72,28 @@ async function reloadRoles() {
   store.roles = Object.fromEntries(rows.map((r) => [r.key, r]));
 }
 
+/* نتائج المتابعة: تُقرأ عند فتح كل سيارة وعند حفظ كل متابعة.
+   الترتيب من القاعدة لا من الواجهة، فيبقى واحداً أينما ظهرت القائمة. */
+async function reloadResults() {
+  store.results = await db.prepare(`
+    SELECT id, code, reached, needs_note, needs_promise, sets_status,
+           sort_order, active, builtin, slot
+    FROM results ORDER BY sort_order, id`).all();
+}
+
 async function reloadAll() {
-  await Promise.all([reloadSettings(), reloadLicense(), reloadPermissions(), reloadRoles()]);
+  await Promise.all([reloadSettings(), reloadLicense(), reloadPermissions(),
+                     reloadRoles(), reloadResults()]);
   store.loaded = true;
   store.loadedAt = Date.now();
 }
 
 module.exports = {
   store, freshen, middleware, TTL_MS,
-  reloadAll, reloadSettings, reloadLicense, reloadPermissions, reloadRoles,
+  reloadAll, reloadSettings, reloadLicense, reloadPermissions, reloadRoles, reloadResults,
   settings: () => store.settings,
   license: () => store.license,
   permissions: () => store.permissions,
   roles: () => store.roles,
+  results: () => store.results,
 };

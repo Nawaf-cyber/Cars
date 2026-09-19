@@ -48,7 +48,7 @@
       <button data-tab="import" data-cap="cars.import">استيراد وتوزيع</button>
       <button data-tab="permissions" data-cap="features.manage">الصلاحيات</button>
       <button data-tab="integrations" data-cap="integrations.manage">ربط البرامج</button>
-      <button data-tab="settings" data-cap="settings.manage">الإعدادات</button>
+      <button data-tab="settings" data-cap="settings.manage|results.manage">الإعدادات</button>
     </nav>
     <div class="user-box">
       <span id="user-name"></span>
@@ -235,7 +235,7 @@
 
     <section id="tab-settings" class="tab-panel hidden">
       <h2>الإعدادات</h2>
-      <form class="panel form-grid" id="settings-form">
+      <form class="panel form-grid" id="settings-form" data-cap="settings.manage">
         <label>اسم الشركة<input name="company_name"></label>
         <label>السقف الافتراضي لعدد السيارات لكل موظف
           <input name="default_max_cars" type="number" min="1">
@@ -251,11 +251,19 @@
         </label>
         <div><button class="btn primary" type="submit">حفظ الإعدادات</button></div>
       </form>
-      <div class="panel">
+      <div class="panel" id="results-panel" data-cap="results.manage">
+        <h3>نتائج المتابعة</h3>
+        <p class="muted" style="margin-bottom:.8rem">
+          ما يختاره الموظف بعد كل محاولة تواصل. أضف ما يناسب عمل شركتك، وأعد تسمية
+          ما لا يناسبها — النتيجة المطفأة تختفي من القائمة ويبقى تاريخها في المتابعات القديمة.
+        </p>
+        <div id="results-box"></div>
+      </div>
+      <div class="panel" data-cap="settings.manage">
         <h3>قاعدة البيانات والنسخ الاحتياطي</h3>
         <div id="db-status"></div>
       </div>
-      <div class="panel">
+      <div class="panel" data-cap="reports.audit">
         <h3>سجل النشاط</h3>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>الوقت</th><th>المستخدم</th><th>الإجراء</th><th>التفاصيل</th></tr></thead>

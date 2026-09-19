@@ -104,22 +104,31 @@ function toNumber(raw, fallback = 0) {
   return isFinite(n) ? n : fallback;
 }
 
-// ---------- نتائج التواصل ----------
-// كل نتيجة لها كود ثابت (للتقارير) + هل تتطلب سبباً + هل تتطلب تاريخ وعد
+/* ---------- نتائج التواصل ----------
+   هذه القائمة صارت بذرةَ جدول results لا مصدرَ الحقيقة: الشركة تعدّلها
+   وتضيف إليها من شاشة الإعدادات. تبقى هنا لزرع أول تشغيل، ولتعمل الواجهة
+   لحظةَ إقلاعٍ قبل تحميل الجدول.
+
+   status: حالة السيارة بعد النتيجة. null تعني "لا تحسم شيئاً" — السيارة
+   المفتوحة تصير قيد المتابعة، وما عداها يبقى كما هو. */
 const RESULT_CODES = [
-  { code: 'سدد المبلغ',            reached: 1, needsNote: 0, needsPromise: 0, closes: 1 },
-  { code: 'وعد بالسداد',            reached: 1, needsNote: 0, needsPromise: 1, closes: 0 },
-  { code: 'سدد جزء من المبلغ',      reached: 1, needsNote: 0, needsPromise: 1, closes: 0 },
-  { code: 'سيراجع الشركة',          reached: 1, needsNote: 0, needsPromise: 1, closes: 0 },
-  { code: 'مسافر خارج المملكة',     reached: 1, needsNote: 1, needsPromise: 0, closes: 0 },
-  { code: 'رفض السداد',             reached: 1, needsNote: 1, needsPromise: 0, closes: 0 },
-  { code: 'لم يتم التجاوب',         reached: 0, needsNote: 0, needsPromise: 0, closes: 0 },
-  { code: 'الرقم مغلق',             reached: 0, needsNote: 0, needsPromise: 0, closes: 0 },
-  { code: 'الرقم ليس للسائق',       reached: 0, needsNote: 0, needsPromise: 0, closes: 0 },
-  { code: 'لا يوجد رقم للتواصل',    reached: 0, needsNote: 0, needsPromise: 0, closes: 0 },
-  { code: 'أخرى',                   reached: 0, needsNote: 1, needsPromise: 0, closes: 0 },
+  { code: 'سدد المبلغ',            reached: 1, needsNote: 0, needsPromise: 0, status: 'مسدد' },
+  { code: 'وعد بالسداد',            reached: 1, needsNote: 0, needsPromise: 1, status: 'وعد بالسداد' },
+  { code: 'سدد جزء من المبلغ',      reached: 1, needsNote: 0, needsPromise: 1, status: 'وعد بالسداد' },
+  { code: 'سيراجع الشركة',          reached: 1, needsNote: 0, needsPromise: 1, status: null },
+  { code: 'مسافر خارج المملكة',     reached: 1, needsNote: 1, needsPromise: 0, status: null },
+  { code: 'رفض السداد',             reached: 1, needsNote: 1, needsPromise: 0, status: 'متعذر' },
+  { code: 'لم يتم التجاوب',         reached: 0, needsNote: 0, needsPromise: 0, status: 'متعذر' },
+  { code: 'الرقم مغلق',             reached: 0, needsNote: 0, needsPromise: 0, status: 'متعذر' },
+  { code: 'الرقم ليس للسائق',       reached: 0, needsNote: 0, needsPromise: 0, status: 'متعذر' },
+  { code: 'لا يوجد رقم للتواصل',    reached: 0, needsNote: 0, needsPromise: 0, status: 'متعذر' },
+  { code: 'أخرى',                   reached: 0, needsNote: 1, needsPromise: 0, status: null },
 ];
 const RESULT_MAP = new Map(RESULT_CODES.map((r) => [r.code, r]));
+
+/* النتيجة التي يسند إليها الاستيراد ما كتبه الموظف في عمود "النتيجة":
+   ليست نتيجةً بل خانة "غير ذلك"، ولذلك لا تُحذف ولا تُطفأ. */
+const FALLBACK_RESULT = 'أخرى';
 
 const CAR_TYPES = ['نقل عام', 'نقل خاص', 'خاص'];
 const CAR_STATUSES = ['مفتوح', 'قيد المتابعة', 'وعد بالسداد', 'مسدد', 'متعذر', 'منتهي بالتمليك'];
@@ -184,12 +193,14 @@ const LEGACY_IMPORT_PREFIX = /^\s*مُرحَّل من الإكسل\s*:\s*/;
  * عندنا المتابعة مركّبة: نتيجة مختارة من قائمة + تفاصيل حرّة. وفي كشوف
  * الشركة عمودٌ واحد. "أخرى" ليست نتيجة بل خانة "غير ذلك"، فذكرها أمام
  * التفاصيل حشوٌ يملأ العمود بلا معنى — نعرض التفاصيل وحدها حينئذ.
+ *
+ * fallback يُمرَّر لأن الشركة تملك تسمية تلك الخانة، فقد لا تبقى "أخرى".
  */
-function resultText(code, note) {
+function resultText(code, note, fallback = FALLBACK_RESULT) {
   const clean = String(note ?? '').replace(LEGACY_IMPORT_PREFIX, '').trim();
   const label = String(code ?? '').trim();
   if (!clean) return label;
-  if (!label || label === 'أخرى') return clean;
+  if (!label || label === fallback) return clean;
   return label + ' — ' + clean;
 }
 
@@ -252,7 +263,8 @@ module.exports = {
   toEnglishDigits, normalizePlate, formatPlate, parsePlate, normalizeLetters,
   PLATE_LETTERS, normalizePhone, toNumber, money,
   PLACEHOLDERS, blankIfPlaceholder, resultText,
-  RESULT_CODES, RESULT_MAP, CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
+  RESULT_CODES, RESULT_MAP, FALLBACK_RESULT,
+  CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
   CHARGE_KINDS, CHARGE_STATUSES, CAR_STATES,
   today, now, hoursAgo, isValidDate, parseDate,
 };

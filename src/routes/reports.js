@@ -206,6 +206,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
     ORDER BY u.name, c.plate`).all());
 
   const byEmployee = new Map();
+  const fallback = require('../results').fallbackCode();   // اسم خانة "غير ذلك" كما سمّتها الشركة
   for (const r of rows) {
     const key = r.emp_name || 'غير مسندة';
     if (!byEmployee.has(key)) byEmployee.set(key, []);
@@ -216,7 +217,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
       phone: r.driver_phone,
       amount: r.total_amount,
       contacted: r.contacts > 0,
-      result: U.resultText(r.code, r.note),
+      result: U.resultText(r.code, r.note, fallback),
     });
   }
 

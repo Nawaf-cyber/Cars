@@ -5,6 +5,7 @@ const A = require('../auth');
 const U = require('../util');
 const { getSetting } = require('../settings');
 const P = require('../permissions');
+const RES = require('../results');
 
 const router = express.Router();
 
@@ -372,7 +373,8 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
 
   const b = req.body || {};
-  const rc = U.RESULT_MAP.get(String(b.result_code || ''));
+  // النتائج يملكها المدير ويعدّلها — لا قائمة ثابتة في الكود
+  const rc = RES.find(b.result_code);
   if (!rc) return res.status(400).json({ error: 'اختر نتيجة صحيحة من القائمة' });
 
   const note = String(b.result_note || '').trim();
@@ -390,13 +392,8 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
     INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, promise_date, channel, created_at)
     VALUES (?,?,?,?,?,?,?,?)`).run(id, req.user.id, reached, rc.code, note || null, promise, channel, U.now()));
 
-  // تحديث حالة السيارة تبعاً للنتيجة
-  let status = car.status;
-  if (rc.code === 'سدد المبلغ') status = 'مسدد';
-  else if (rc.code === 'وعد بالسداد' || rc.code === 'سدد جزء من المبلغ') status = 'وعد بالسداد';
-  else if (['لم يتم التجاوب', 'الرقم مغلق', 'الرقم ليس للسائق', 'لا يوجد رقم للتواصل', 'رفض السداد'].includes(rc.code))
-    status = 'متعذر';
-  else if (car.status === 'مفتوح') status = 'قيد المتابعة';
+  // حالة السيارة تتبع النتيجة — والربط محفوظ مع النتيجة نفسها لا هنا
+  const status = RES.nextStatus(rc, car.status);
   (await db.prepare("UPDATE cars SET status=?, updated_at=datetime('now','+3 hours') WHERE id=?").run(status, id));
   await refreshStatus(id);
 

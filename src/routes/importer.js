@@ -10,6 +10,7 @@ const A = require('../auth');
 const U = require('../util');
 const { getSetting } = require('../settings');
 const P = require('../permissions');
+const RES = require('../results');
 
 const router = express.Router();
 
@@ -350,9 +351,11 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
        كانت تُسبق بـ"مُرحَّل من الإكسل:" لتمييزها عن عمل الموظفين عند التراجع،
        فصارت البادئة تظهر في كل تصدير وتلوّث العمود. صار التمييز في العمود
        source — علامةٌ لا يقرأها المستخدم — والنصّ يبقى نظيفاً. */
+    // النتيجة المحجوزة للاستيراد — بخانتها لا باسمها، فالشركة قد تعيد تسميتها
+    const importResult = RES.fallbackCode();
     const insertNote = tx.prepare(`
       INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, channel, source, created_at)
-      VALUES (?,?,0,'أخرى',?,'اتصال','استيراد',?)`);
+      VALUES (?,?,0,?,?,'اتصال','استيراد',?)`);
     for (let i = 0; i < dataRows.length; i++) {
       const r = dataRows[i];
       const rowNo = headerIdx + 2 + i;
@@ -424,7 +427,8 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
         amount, 'مفتوح', assignedTo, req.user.id, batchId, null
       );
       // نقل "النتيجة" القديمة من الإكسل كأول متابعة مؤرَّخة حتى لا تضيع
-      if (resultText) await insertNote.run(Number(info.lastInsertRowid), req.user.id, resultText, U.now());
+      if (resultText)
+        await insertNote.run(Number(info.lastInsertRowid), req.user.id, importResult, resultText, U.now());
       inserted++;
       countAssigned();
     }

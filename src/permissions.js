@@ -88,6 +88,7 @@ const CAPABILITIES = [
 
   { key: 'followups.create',   group: 'المتابعة',  label: 'تسجيل متابعة' },
   { key: 'followups.delete',   group: 'المتابعة',  label: 'حذف متابعة' },
+  { key: 'results.manage',     group: 'المتابعة',  label: 'تعديل قائمة نتائج المتابعة' },
   { key: 'payments.create',    group: 'المتابعة',  label: 'تسجيل دفعة' },
   { key: 'payments.delete',    group: 'المتابعة',  label: 'حذف دفعة' },
 
@@ -126,7 +127,8 @@ const DEFAULTS = {
   supervisor: [
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
     'cars.assign', 'cars.import',
-    'followups.create', 'followups.delete', 'payments.create', 'payments.delete',
+    'followups.create', 'followups.delete', 'results.manage',
+    'payments.create', 'payments.delete',
     'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
     'reports.performance', 'reports.export', 'reports.audit',
@@ -136,7 +138,8 @@ const DEFAULTS = {
   manager: [
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
     'cars.assign', 'cars.import',
-    'followups.create', 'followups.delete', 'payments.create', 'payments.delete',
+    'followups.create', 'followups.delete', 'results.manage',
+    'payments.create', 'payments.delete',
     'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
     'reports.performance', 'reports.export', 'reports.audit',

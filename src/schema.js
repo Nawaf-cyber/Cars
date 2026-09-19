@@ -168,6 +168,36 @@ CREATE TABLE IF NOT EXISTS roles (
 
 CREATE INDEX IF NOT EXISTS idx_roles_rank ON roles(rank);
 
+-- ============================================================================
+--  نتائج المتابعة — كانت قائمة ثابتة في الكود، وصارت بيانات
+--  ----------------------------------------------------------------------------
+--  كل شركة وطريقتها في تسمية ما يحدث مع السائق. القائمة المثبَّتة كانت تعني
+--  أن أي نتيجة جديدة تحتاج برمجة ونشراً.
+--
+--  النتيجة ليست نصّاً فقط بل سلوك: هل رُدَّ على الاتصال؟ هل يلزم سبب مكتوب؟
+--  هل يلزم تاريخ وعد؟ وإلى أي حالة تنقل السيارة؟ لذلك تُحفظ هذه الحقول معها.
+--
+--  الصفوف القديمة تحفظ نصّ النتيجة لا رقمها، فإعادة التسمية تُمرَّر عليها
+--  كلها حتى لا ينقسم التقرير نصفين تحت اسمين لشيء واحد.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS results (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  code          TEXT    NOT NULL UNIQUE,        -- النصّ كما يراه الموظف ويُحفظ في المتابعة
+  reached       INTEGER NOT NULL DEFAULT 1,     -- هل تعني أن السائق ردّ؟
+  needs_note    INTEGER NOT NULL DEFAULT 0,     -- تُلزم بكتابة السبب
+  needs_promise INTEGER NOT NULL DEFAULT 0,     -- تُلزم بتاريخ وعد بالسداد
+  sets_status   TEXT,                           -- حالة السيارة بعدها (NULL = قيد المتابعة)
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  active        INTEGER NOT NULL DEFAULT 1,     -- المطفأة تختفي من القائمة ويبقى تاريخها
+  builtin       INTEGER NOT NULL DEFAULT 0,     -- الأصلية: تُعدَّل وتُطفأ ولا تُحذف
+  slot          TEXT,                           -- خانة يحجزها النظام: import = ما يُسند إليه المستورَد
+                                                -- المحجوزة تُسمّى كما تشاء الشركة ولا تُطفأ ولا تُحذف
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_results_order ON results(active, sort_order);
+
 -- ---------- الصلاحيات كمفاتيح تُشغَّل وتُطفَأ ----------
 -- بدل تثبيت صلاحيات كل دور في الكود، تُخزَّن هنا ويغيّرها مشرف الموظفين بضغطة.
 CREATE TABLE IF NOT EXISTS role_permissions (

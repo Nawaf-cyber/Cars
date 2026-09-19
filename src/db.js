@@ -70,6 +70,7 @@ const USER_LINKS = [
   ['audit_log', 'user_id'], ['salaries', 'user_id'],
   ['payroll_runs', 'created_by'], ['payroll_items', 'user_id'],
   ['import_staging', 'user_id'], ['roles', 'created_by'],
+  ['results', 'created_by'],
 ];
 
 /** يلتقط قيم الروابط قبل عملية قد تُفرغها. */
@@ -152,6 +153,7 @@ async function init() {
   await migrateRoles();
   await migrateOpenRoles();               // يفتح الدور للأدوار المخصّصة
   await seedRoles();
+  await seedResults();
   await migrateCars();
 }
 
@@ -306,6 +308,28 @@ async function seedRoles() {
   const now = require('./util').now();
   for (const [key, label, rank, prefix, hidden] of BUILTIN)
     await ins.run(key, label, rank, hidden, prefix, now);
+}
+
+/**
+ * يزرع نتائج المتابعة الأصلية مرة واحدة.
+ *
+ * ON CONFLICT DO NOTHING مقصود: الشركة تعيد تسمية نتيجة أو تطفئها، فلا يجوز
+ * أن تعيدها ترقيةٌ لاحقة إلى ما كانت عليه. والنصّ هو المفتاح لأن المتابعات
+ * القديمة تحمل النصّ لا الرقم.
+ */
+async function seedResults() {
+  const U = require('./util');
+  const ins = sql.prepare(`
+    INSERT INTO results (code, reached, needs_note, needs_promise, sets_status,
+                         sort_order, active, builtin, slot, created_at)
+    VALUES (?,?,?,?,?,?,1,1,?,?) ON CONFLICT(code) DO NOTHING`);
+  const now = U.now();
+  let order = 0;
+  for (const r of U.RESULT_CODES) {
+    // خانة الاستيراد: ما يكتبه الموظف في عمود "النتيجة" يُحفظ تحتها
+    const slot = r.code === U.FALLBACK_RESULT ? 'import' : null;
+    await ins.run(r.code, r.reached, r.needsNote, r.needsPromise, r.status, order++, slot, now);
+  }
 }
 
 /** أعمدة اللوحة المفصولة + إعادة احتساب المفاتيح بالصيغة الجديدة. */
@@ -468,6 +492,7 @@ module.exports = {
   exec: (s) => sql.exec(s),
   transaction: (fn) => sql.transaction(fn),
   init, checkpoint, closeDb, autoBackup,
+  seedResults,                      // تحتاجها أدوات إعادة الضبط
   isRemote: sql.isRemote,
   DB_FILE: sql.DB_FILE,
   url: sql.url,

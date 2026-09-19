@@ -19,7 +19,13 @@ const S = {
 function isMgr() { return !!S.user?.can_manage; }
 
 /** هل يملك المستخدم هذه القدرة؟ الخادم يفرضها أيضاً — هذا للإخفاء فقط. */
-function cap(key) { return !!S.user?.caps?.[key]; }
+/* "أ|ب" تعني: أيٌّ منهما يكفي.
+   لزمت حين صارت شاشةٌ واحدة تضمّ لوحتين بصلاحيتين مختلفتين — من مُنح
+   إحداهما وحدها كان التبويب يختفي عنه فلا يصل إلى ما مُنحه أصلاً. */
+function cap(key) {
+  const caps = S.user?.caps || {};
+  return String(key).split('|').some((k) => !!caps[k.trim()]);
+}
 
 /* ---------------- أدوات مساعدة ---------------- */
 function esc(v) {
@@ -932,9 +938,13 @@ async function searchZoho(carId) {
 function dcell(k, v) { return `<div class="d"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`; }
 
 function fuItem(f) {
-  const bad = ['لم يتم التجاوب', 'الرقم مغلق', 'الرقم ليس للسائق', 'لا يوجد رقم للتواصل', 'رفض السداد'].includes(f.result_code);
-  const ok = f.result_code === 'سدد المبلغ' || f.result_code === 'سدد جزء من المبلغ';
-  const cls = ok ? 'ok' : bad ? 'bad' : f.promise_date ? 'warn' : '';
+  /* اللون يتبع ما تفعله النتيجة بالسيارة لا اسمَها: النتائج صارت بيد
+     الشركة، وقائمةُ أسماءٍ مكتوبة هنا كانت ستُلوّن المضاف الجديد بلا معنى.
+     أخضر = سُدّد · أحمر = متعذر · أصفر = وعد. */
+  const r = (S.consts.result_codes || []).find((x) => x.code === f.result_code);
+  const cls = r && r.status === 'مسدد' ? 'ok'
+            : r && r.status === 'متعذر' ? 'bad'
+            : (f.promise_date || (r && r.status === 'وعد بالسداد')) ? 'warn' : '';
   const canDel = cap('followups.delete');
   return `<li class="${cls}">
     <div class="t-head">
@@ -1514,7 +1524,10 @@ async function loadSettings() {
   const f = $('#settings-form');
   for (const [k, v] of Object.entries(S.settings)) if (f[k]) f[k].value = v;
 
-  loadDbStatus();
+  // كل لوحة تُحمَّل لصاحب صلاحيتها وحده — الشاشة تُفتح بأيٍّ منها
+  if (cap('settings.manage')) loadDbStatus();
+  if (cap('results.manage')) loadResults();
+  if (!cap('reports.audit')) return;
 
   const a = await api('/reports/audit?limit=150').catch(() => ({ log: [] }));
   $('#audit-body').innerHTML = a.log.map((x) => `<tr>
@@ -1546,7 +1559,7 @@ async function loadDbStatus() {
       ${d.remote ? dcell('نوع القاعدة', 'مستضافة') : dcell('حجم القاعدة', fileSize(d.size))}
       ${dcell('آخر تعديل', dt(d.modified))}
     </div>
-    <p class="muted">مكان الملف: <code>${esc(d.path)}</code></p>
+    ${d.path ? `<p class="muted">مكان الملف: <code>${esc(d.path)}</code></p>` : ''}
     <div class="row gap wrap" style="margin-bottom:.8rem">
       <button class="btn primary" id="db-download">تنزيل نسخة احتياطية الآن</button>
       ${d.remote ? '' : '<button class="btn" id="db-run">تشغيل نسخة الآن</button>'}
@@ -1581,6 +1594,155 @@ async function loadDbStatus() {
       toast(r.extra ? 'تمت النسخة محلياً وخارج الجهاز' : 'تمت النسخة المحلية', 'ok');
       loadDbStatus();
     } catch (e) { toast(e.message, 'bad'); }
+  };
+}
+
+/* ============================================================
+   نتائج المتابعة — قائمة تملكها الشركة لا نحن
+   ------------------------------------------------------------
+   النتيجة ليست نصّاً بل سلوك: تُلزم الموظف بسبب أو بتاريخ وعد، وتنقل
+   السيارة إلى حالة. لذلك النموذج يشرح أثر كل خيار بدل أن يطلب مفاتيح.
+   ============================================================ */
+let resultsData = null;
+
+async function loadResults() {
+  const box = $('#results-box');
+  if (!box) return;
+  box.innerHTML = '<span class="spin"></span> جارٍ التحميل…';
+
+  try { resultsData = await api('/results'); }
+  catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+
+  const rows = resultsData.results;
+  box.innerHTML = `
+    <div class="row between wrap" style="margin-bottom:.6rem">
+      <span class="muted">${num(rows.filter((r) => r.active).length)} نتيجة مفعّلة
+        من ${num(rows.length)}</span>
+      <button class="btn primary" id="res-add">+ نتيجة جديدة</button>
+    </div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr>
+        <th>النتيجة</th><th>حالة السيارة بعدها</th><th>تُلزم بسبب</th>
+        <th>تُلزم بتاريخ وعد</th><th>تعني أن السائق ردّ</th><th>استُعملت</th><th></th>
+      </tr></thead>
+      <tbody>${rows.map(resultRow).join('')}</tbody>
+    </table></div>`;
+
+  $('#res-add').onclick = () => resultForm(null);
+
+  $$('#results-box [data-edit]').forEach((b) => b.onclick = () =>
+    resultForm(rows.find((r) => r.id === +b.dataset.edit)));
+
+  $$('#results-box [data-toggle]').forEach((b) => b.onclick = async () => {
+    const r = rows.find((x) => x.id === +b.dataset.toggle);
+    try {
+      await api('/results/' + r.id, { method: 'PUT', body: { active: r.active ? 0 : 1 } });
+      toast(r.active ? 'أُطفئت — اختفت من القائمة وتاريخها باقٍ' : 'عادت إلى القائمة', 'ok');
+      loadResults();
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  $$('#results-box [data-del]').forEach((b) => b.onclick = () => {
+    const r = rows.find((x) => x.id === +b.dataset.del);
+    confirmBox(`حذف "${r.code}"؟ لم تُستعمل في أي متابعة.`, async () => {
+      try {
+        await api('/results/' + r.id, { method: 'DELETE' });
+        toast('حُذفت النتيجة', 'ok');
+        loadResults();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+  });
+}
+
+function resultRow(r) {
+  const yes = '<span class="badge ok">نعم</span>';
+  const no = '<span class="muted">—</span>';
+  return `<tr${r.active ? '' : ' style="opacity:.55"'}>
+    <td><b>${esc(r.code)}</b>
+      ${r.active ? '' : ' <span class="badge">مطفأة</span>'}
+      ${r.locked ? ' <span class="badge info">يستعملها الاستيراد</span>' : ''}</td>
+    <td>${r.status ? esc(r.status) : '<span class="muted">لا تغيّرها</span>'}</td>
+    <td>${r.needsNote ? yes : no}</td>
+    <td>${r.needsPromise ? yes : no}</td>
+    <td>${r.reached ? yes : no}</td>
+    <td>${num(r.used)}</td>
+    <td>
+      <button class="link" data-edit="${r.id}">تعديل</button>
+      ${r.locked ? '' : `<button class="link" data-toggle="${r.id}"
+          style="margin-right:.6rem">${r.active ? 'إطفاء' : 'تشغيل'}</button>`}
+      ${r.deletable ? `<button class="link" data-del="${r.id}"
+          style="margin-right:.6rem;color:var(--bad)">حذف</button>` : ''}
+    </td>
+  </tr>`;
+}
+
+async function resultForm(existing) {
+  const isNew = !existing;
+  const statuses = resultsData.statuses || [];
+  const chk = (on) => (on ? 'checked' : '');
+
+  const b = openModal(isNew ? 'نتيجة متابعة جديدة' : 'تعديل النتيجة', `
+    <form id="res-form">
+      <label>نصّ النتيجة *
+        <input name="code" value="${esc(existing?.code || '')}" required maxlength="60"
+               placeholder="مثال: طلب مهلة أسبوع">
+        <small class="muted">هذا ما يختاره الموظف ويظهر في التقارير وملف التحصيل.</small>
+      </label>
+
+      ${!isNew && existing.used ? `<div class="alert warn">مسجّلة في
+        ${num(existing.used)} متابعة سابقة. تغيير النصّ يغيّر اسمها فيها كلها —
+        لا تُحذف ولا تضيع، ويبقى التقرير موحّداً تحت الاسم الجديد.</div>` : ''}
+
+      <label>حالة السيارة بعد هذه النتيجة
+        <select name="sets_status">
+          <option value="">— لا تغيّرها (المفتوحة تصير قيد المتابعة) —</option>
+          ${statuses.map((s) => `<option value="${esc(s)}"
+            ${existing?.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label class="perm-row" style="margin-top:.6rem">
+        <input type="checkbox" name="needs_note" ${chk(existing?.needsNote)}>
+        <span>تُلزم الموظف بكتابة السبب</span></label>
+
+      <label class="perm-row">
+        <input type="checkbox" name="needs_promise" ${chk(existing?.needsPromise)}>
+        <span>تُلزم الموظف بتحديد تاريخ وعد بالسداد</span></label>
+
+      <label class="perm-row">
+        <input type="checkbox" name="reached" ${chk(isNew ? true : existing.reached)}>
+        <span>تعني أن السائق ردّ — تُحتسب في تقرير الأداء</span></label>
+
+      ${!isNew && !existing.locked ? `
+      <label class="perm-row">
+        <input type="checkbox" name="active" ${chk(existing.active)}>
+        <span>مفعّلة — تظهر للموظفين في قائمة الاختيار</span></label>` : ''}
+
+      <div class="modal-actions"><button class="btn primary">${isNew ? 'إضافة' : 'حفظ'}</button></div>
+    </form>`);
+
+  $('#res-form', b).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    // خانات الاختيار لا تُرسل حين تكون مطفأة، والخادم يحتاج القيمتين صراحةً
+    const body = {
+      code: f.code.value,
+      sets_status: f.sets_status.value,
+      needs_note: f.needs_note.checked ? 1 : 0,
+      needs_promise: f.needs_promise.checked ? 1 : 0,
+      reached: f.reached.checked ? 1 : 0,
+    };
+    if (f.active) body.active = f.active.checked ? 1 : 0;
+
+    try {
+      const r = isNew
+        ? await api('/results', { method: 'POST', body })
+        : await api('/results/' + existing.id, { method: 'PUT', body });
+      toast(r.renamed ? `تم الحفظ — حُدِّث الاسم في ${r.renamed} متابعة` : 'تم الحفظ', 'ok');
+      closeModal();
+      loadResults();
+      S.consts = await api('/constants');    // القائمة عند الموظف تتبع التعديل فوراً
+    } catch (ex) { toast(ex.message, 'bad'); }
   };
 }
 

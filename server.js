@@ -126,7 +126,8 @@ app.get('/api/health', (req, res) => {
 // ---------- الثوابت التي تحتاجها الواجهة ----------
 app.get('/api/constants', (req, res) => {
   res.json({
-    result_codes: U.RESULT_CODES,
+    // النتائج لم تعد ثابتة: الشركة تعدّلها، والمطفأة لا تُعرض للاختيار
+    result_codes: require('./src/results').active(),
     car_types: U.CAR_TYPES,
     car_statuses: U.CAR_STATUSES,
     car_states: U.CAR_STATES,
@@ -199,9 +200,21 @@ function removeTempFile(file, tries = 8, wait = 300) {
   }
 }
 
+/**
+ * اسم ملف النسخة: اسم النظام وتاريخ اليوم، لا أكثر.
+ *
+ * الملف يصل إلى الشركة ويُحفظ عندها سنين، فلا يحمل اسم مزوّد القاعدة ولا
+ * اسم من طوّر النظام — لا علاقة لهما بمحتواه. وننظّف ما تمنعه أنظمة الملفات.
+ */
+function backupFileName() {
+  const raw = String(getSetting('company_name', '') || '').trim();
+  const safe = raw.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  return `نسخة-${(safe || 'النظام').split(' ').join('-')}-${U.today()}.db`;
+}
+
 app.get('/api/backup', A.requireManager, async (req, res) => {
   const os = require('os');
-  const name = `backup-${U.today()}.db`;
+  const name = backupFileName();
   const tmp = path.join(os.tmpdir(), `export-${Date.now()}-${process.pid}.db`);
 
   try {
@@ -242,7 +255,10 @@ app.get('/api/db-status', A.requireManager, async (req, res) => {
   }
 
   res.json({
-    path: db.isRemote ? String(db.url).split('?')[0] : db.DB_FILE,
+    /* عنوان القاعدة المستضافة لا يُعرض: فيه اسم الحساب عند المزوّد، وهو
+       تفصيل تشغيلي لا يخصّ الشركة ولا يفيدها في شيء. الملف المحلي يُعرض
+       لأن صاحبه يحتاج مكانه فعلاً. */
+    path: db.isRemote ? null : db.DB_FILE,
     remote: db.isRemote,
     size: stat ? stat.size : 0,
     modified: stat ? stat.mtime.toISOString() : null,
@@ -284,6 +300,7 @@ app.use(LIC.gate);
 app.use('/api/owner', require('./src/routes/owner'));
 app.use('/api/integrations', require('./src/routes/integrations'));
 app.use('/api/roles', require('./src/routes/roles'));
+app.use('/api/results', require('./src/routes/results'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/users', require('./src/routes/users'));
@@ -443,7 +460,8 @@ function banner(created, backup) {
   for (const i of ips.filter((x) => x.virtual))
     console.log(`  (تجاهل: ${i.address} — محوّل وهمي ${i.name})`);
   console.log(line);
-  console.log('  قاعدة البيانات :  ' + (db.isRemote ? 'مستضافة — ' + String(db.url).split('?')[0] : db.DB_FILE));
+  // بلا عنوان المزوّد: الشاشة تُصوَّر وتُرسل، والعنوان يحمل اسم الحساب
+  console.log('  قاعدة البيانات :  ' + (db.isRemote ? 'مستضافة — خارج هذا الجهاز' : db.DB_FILE));
   if (backup.local) console.log(`  نسخة اليوم     :  ${path.relative(__dirname, backup.local)}`);
   if (backup.extra) console.log(`  نسخة خارجية    :  ${backup.extra}`);
   else if (!getSetting('backup_dir', ''))
