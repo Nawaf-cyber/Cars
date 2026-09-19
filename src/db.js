@@ -135,12 +135,13 @@ async function init() {
       if (!definesColumn(live[table], column)) missing.push(table + '.' + column);
   }
 
-  const upToDate =
-    probe && probe.tables >= EXPECTED_TABLES &&
-    missing.length === 0 &&
-    live.users && live.users.includes("'supervisor'") &&
-    // قيد الدور يجب أن يكون قد أُزيل — وإلا أُعيدت الترقية ولو بدت الجداول كاملة
-    !/CHECK\s*\(\s*role\s+IN/i.test(live.users);
+  /* علامة "القاعدة محدَّثة" يجب أن تبقى صحيحة بعد الترقية، وإلا أُعيدت أبداً.
+     كانت تشترط وجود كلمة 'supervisor' في تعريف users — وهي جزء من قيد الدور
+     الذي تحذفه الترقية نفسها! فصار الشرط مستحيلاً بعد نجاحها، وأُعيد بناءُ
+     جدول المستخدمين في كل بداية باردة. وفي إحداها ضاع الجدول كله.
+     الشرط الصحيح: لا قيدَ على الدور — وهذا ما تتركه الترقية فعلاً. */
+  const rolesOpen = live.users && !/CHECK\s*\(\s*role\s+IN/i.test(live.users);
+  const upToDate = probe && probe.tables >= EXPECTED_TABLES && missing.length === 0 && rolesOpen;
 
   if (upToDate) return;    // المخطط موجود ومحدّث — لا داعي لإعادة العمل
 
@@ -150,7 +151,6 @@ async function init() {
 
   await sql.exec(SCHEMA);                 // ينشئ الجداول الناقصة كاملةً
   await addMissingColumns(live, missing); // ويضيف الأعمدة للجداول القائمة
-  await migrateRoles();
   await migrateOpenRoles();               // يفتح الدور للأدوار المخصّصة
   await seedRoles();
   await seedResults();
@@ -200,41 +200,39 @@ function definitionOf(table, column) {
   return null;
 }
 
-/** قيد users.role القديم لا يسمح بالأدوار الجديدة — نعيد بناء الجدول بلا فقد بيانات. */
-async function migrateRoles() {
-  const row = await sql.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
-  if (!row || row.sql.includes("'supervisor'")) return;
+/* أُزيلت من هنا ترقيةٌ ثانية كانت تعيد بناء جدول المستخدمين (migrateRoles).
+   كانت تتعرّف على "هل رُقِّيت القاعدة؟" بوجود كلمة 'supervisor' في قيد الدور،
+   والترقية التالية تحذف القيد كله — فصارت ترى القاعدة غيرَ مرقّاة أبداً،
+   وتعيد بناء الجدول في كل بداية باردة. وفي إحداها ضاع الجدول كله وخرج
+   الموظفون من النظام.
 
-  const links = await snapshotLinks();   // قبل أي حذف
+   لا حاجة إليها أصلاً: migrateOpenRoles أدناه تزيل القيد وتنقل الصفوف كلها
+   مهما كان دورها، وتعدّها قبل وبعد ولا تحذف القديم إلا عند التطابق.
+   مسارٌ واحد لإعادة البناء أسلم من مسارين. */
 
-  await tryPragma('PRAGMA foreign_keys = OFF');
-  await tryPragma('PRAGMA legacy_alter_table = ON');
-  try {
-    await sql.exec(`
-      CREATE TABLE users_new (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        emp_code      TEXT    NOT NULL UNIQUE,
-        name          TEXT    NOT NULL,
-        username      TEXT    NOT NULL UNIQUE,
-        password_hash TEXT    NOT NULL,
-        role          TEXT    NOT NULL CHECK (role IN ('owner','supervisor','manager','deputy','employee')),
-        phone         TEXT,
-        max_cars      INTEGER,
-        active        INTEGER NOT NULL DEFAULT 1,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
-      );
-      INSERT INTO users_new (id, emp_code, name, username, password_hash, role, phone, max_cars, active, created_at)
-        SELECT id, emp_code, name, username, password_hash, role, phone, max_cars, active, created_at FROM users;
-      DROP TABLE users;
-      ALTER TABLE users_new RENAME TO users;
-    `);
-    await restoreLinks(links);
-    console.log('[ترقية] تم توسيع الأدوار: مشرف الموظفين ومشرف القسم.');
-  } finally {
-    await tryPragma('PRAGMA legacy_alter_table = OFF');
-    await sql.exec('PRAGMA foreign_keys = ON');
+/** كل صفوف المستخدمين — شبكة أمان تحت أي عملية تلمس الجدول. */
+async function snapshotUsers() {
+  try { return await sql.prepare('SELECT * FROM users').all(); }
+  catch { return []; }
+}
+
+/**
+ * يعيد كل حساب فُقد، بمعرّفه وكلمة مروره كما كانا.
+ * لا يلمس الموجود: من بقي يبقى كما هو، والناقص وحده يُعاد.
+ */
+async function restoreUsers(rows) {
+  if (!rows.length) return 0;
+  const cols = Object.keys(rows[0]);
+  const stmt = sql.prepare(
+    `INSERT INTO users (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})` +
+    ' ON CONFLICT(id) DO NOTHING');
+  let back = 0;
+  for (const r of rows) {
+    try { if ((await stmt.run(...cols.map((c) => r[c]))).changes) back++; }
+    catch (e) { console.error('[تحذير] تعذّر إرجاع الحساب ' + r.emp_code + ': ' + e.message); }
   }
+  if (back) console.log('[ترقية] أُعيد ' + back + ' حساباً بعد إعادة بناء الجدول.');
+  return back;
 }
 
 /**
@@ -253,6 +251,7 @@ async function migrateOpenRoles() {
 
   const before = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
   const links = await snapshotLinks();   // قبل أي حذف
+  const people = await snapshotUsers();  // والحسابات نفسها: شبكة الأمان الأخيرة
 
   await tryPragma('PRAGMA foreign_keys = OFF');
   await tryPragma('PRAGMA legacy_alter_table = ON');
@@ -284,7 +283,15 @@ async function migrateOpenRoles() {
     await sql.exec('DROP TABLE users');
     await sql.exec('ALTER TABLE users_open RENAME TO users');
 
-    const after = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
+    /* ولو خرج الجدول ناقصاً رغم كل ما سبق — لتزاحم نسختين على الاستضافة
+       مثلاً — نعيد الحسابات من اللقطة قبل أن يكمل الإقلاع. */
+    let after = Number((await sql.prepare('SELECT COUNT(*) n FROM users').get()).n);
+    if (after < Number(before)) {
+      console.error(`[خطر] الجدول خرج بـ${after} حساباً من ${before} — نُعيد الناقص.`);
+      await restoreUsers(people);
+      after = Number((await sql.prepare('SELECT COUNT(*) n FROM users').get()).n);
+    }
+
     await restoreLinks(links);           // ما أفرغه الحذف يعود
     console.log(`[ترقية] الأدوار صارت مفتوحة — ${after} حساباً سليمة.`);
   } finally {
@@ -493,6 +500,7 @@ module.exports = {
   transaction: (fn) => sql.transaction(fn),
   init, checkpoint, closeDb, autoBackup,
   seedResults,                      // تحتاجها أدوات إعادة الضبط
+  snapshotUsers, restoreUsers,      // شبكة أمان الحسابات — وأدوات الاسترجاع
   isRemote: sql.isRemote,
   DB_FILE: sql.DB_FILE,
   url: sql.url,
