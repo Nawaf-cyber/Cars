@@ -56,6 +56,53 @@ async function tryPragma(stmt) {
   catch (e) { return false; }
 }
 
+/* الأعمدة التي تشير إلى users. كلها ON DELETE SET NULL، أي أن حذف جدول
+   المستخدمين يُفرغها — وهذا ليس افتراضاً: وقع فعلاً وأفرغ 705 روابط على
+   قاعدة الشركة، فضاع إسناد كل سيارة وصاحبُ كل متابعة.
+
+   "PRAGMA foreign_keys = OFF" يمنع ذلك، لكن القاعدة المستضافة ترفضه بصمت.
+   فلا نعتمد عليه: نلتقط الروابط قبل إعادة البناء ونعيدها بعدها، فتنجو
+   سواء عُطِّلت الروابط أم لا. */
+const USER_LINKS = [
+  ['cars', 'assigned_to'], ['cars', 'added_by'],
+  ['follow_ups', 'user_id'], ['payments', 'created_by'],
+  ['charges', 'created_by'], ['import_batches', 'created_by'],
+  ['audit_log', 'user_id'], ['salaries', 'user_id'],
+  ['payroll_runs', 'created_by'], ['payroll_items', 'user_id'],
+  ['import_staging', 'user_id'], ['roles', 'created_by'],
+];
+
+/** يلتقط قيم الروابط قبل عملية قد تُفرغها. */
+async function snapshotLinks() {
+  const snap = [];
+  for (const [table, col] of USER_LINKS) {
+    try {
+      const rows = await sql.prepare(
+        `SELECT id, ${col} v FROM ${table} WHERE ${col} IS NOT NULL`).all();
+      if (rows.length) snap.push({ table, col, rows });
+    } catch { /* جدول أو عمود غير موجود بعد — لا شيء يُلتقط */ }
+  }
+  return snap;
+}
+
+/** يعيد ما أُفرغ منها، ولا يلمس ما ليس فارغاً. */
+async function restoreLinks(snap) {
+  let restored = 0;
+  for (const { table, col, rows } of snap) {
+    try {
+      const up = sql.prepare(`UPDATE ${table} SET ${col}=? WHERE id=? AND ${col} IS NULL`);
+      for (const r of rows) {
+        const res = await up.run(r.v, r.id);
+        if (res.changes) restored++;
+      }
+    } catch (e) {
+      console.error('[تحذير] تعذّر استرجاع ' + table + '.' + col + ': ' + e.message);
+    }
+  }
+  if (restored) console.log('[ترقية] أُعيد ' + restored + ' رابطاً بعد إعادة بناء الجدول.');
+  return restored;
+}
+
 async function init() {
   if (!sql.isRemote) {
     // إعدادات تخص الملف المحلي فقط
@@ -157,6 +204,8 @@ async function migrateRoles() {
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
   if (!row || row.sql.includes("'supervisor'")) return;
 
+  const links = await snapshotLinks();   // قبل أي حذف
+
   await tryPragma('PRAGMA foreign_keys = OFF');
   await tryPragma('PRAGMA legacy_alter_table = ON');
   try {
@@ -178,6 +227,7 @@ async function migrateRoles() {
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
     `);
+    await restoreLinks(links);
     console.log('[ترقية] تم توسيع الأدوار: مشرف الموظفين ومشرف القسم.');
   } finally {
     await tryPragma('PRAGMA legacy_alter_table = OFF');
@@ -200,6 +250,7 @@ async function migrateOpenRoles() {
   if (!row || !/CHECK\s*\(\s*role\s+IN/i.test(row.sql)) return;   // مفتوح أصلاً
 
   const before = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
+  const links = await snapshotLinks();   // قبل أي حذف
 
   await tryPragma('PRAGMA foreign_keys = OFF');
   await tryPragma('PRAGMA legacy_alter_table = ON');
@@ -232,6 +283,7 @@ async function migrateOpenRoles() {
     await sql.exec('ALTER TABLE users_open RENAME TO users');
 
     const after = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
+    await restoreLinks(links);           // ما أفرغه الحذف يعود
     console.log(`[ترقية] الأدوار صارت مفتوحة — ${after} حساباً سليمة.`);
   } finally {
     await tryPragma('PRAGMA legacy_alter_table = OFF');
