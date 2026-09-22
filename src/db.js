@@ -70,8 +70,43 @@ const USER_LINKS = [
   ['audit_log', 'user_id'], ['salaries', 'user_id'],
   ['payroll_runs', 'created_by'], ['payroll_items', 'user_id'],
   ['import_staging', 'user_id'], ['roles', 'created_by'],
-  ['results', 'created_by'],
+  ['results', 'created_by'], ['follow_ups', 'via_user_id'],
+  ['referrals', 'closed_by'],
 ];
+
+/* جداول تشير إلى users بـ ON DELETE CASCADE — أي أن حذف جدول المستخدمين
+   لا يُفرغ أعمدتها بل يمحو صفوفها كلها. الإفراغ يُعالَج بالاسترجاع أعلاه،
+   أما المحو فلا يُعالَج إلا بلقطة كاملة. فنأخذها. */
+const CASCADE_TABLES = ['contact_links', 'referrals'];
+
+/** لقطة كاملة بصفوف الجداول التي تموت مع المستخدمين. */
+async function snapshotCascades() {
+  const snap = [];
+  for (const table of CASCADE_TABLES) {
+    try {
+      const rows = await sql.prepare(`SELECT * FROM ${table}`).all();
+      if (rows.length) snap.push({ table, rows });
+    } catch { /* الجدول غير موجود بعد */ }
+  }
+  return snap;
+}
+
+/** يعيد ما مُحي منها، ولا يكرّر ما بقي. */
+async function restoreCascades(snap) {
+  let back = 0;
+  for (const { table, rows } of snap) {
+    const cols = Object.keys(rows[0]);
+    const stmt = sql.prepare(
+      `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})` +
+      ' ON CONFLICT(id) DO NOTHING');
+    for (const r of rows) {
+      try { if ((await stmt.run(...cols.map((c) => r[c]))).changes) back++; }
+      catch (e) { console.error('[تحذير] تعذّر إرجاع صفّ في ' + table + ': ' + e.message); }
+    }
+  }
+  if (back) console.log('[ترقية] أُعيد ' + back + ' صفّاً مرتبطاً بالمستخدمين.');
+  return back;
+}
 
 /** يلتقط قيم الروابط قبل عملية قد تُفرغها. */
 async function snapshotLinks() {
@@ -252,6 +287,7 @@ async function migrateOpenRoles() {
   const before = (await sql.prepare('SELECT COUNT(*) n FROM users').get()).n;
   const links = await snapshotLinks();   // قبل أي حذف
   const people = await snapshotUsers();  // والحسابات نفسها: شبكة الأمان الأخيرة
+  const bound = await snapshotCascades();// وما يُمحى معها لا يُفرَّغ فقط
 
   await tryPragma('PRAGMA foreign_keys = OFF');
   await tryPragma('PRAGMA legacy_alter_table = ON');
@@ -293,6 +329,7 @@ async function migrateOpenRoles() {
     }
 
     await restoreLinks(links);           // ما أفرغه الحذف يعود
+    await restoreCascades(bound);        // وما محاه كذلك
     console.log(`[ترقية] الأدوار صارت مفتوحة — ${after} حساباً سليمة.`);
   } finally {
     await tryPragma('PRAGMA legacy_alter_table = OFF');
@@ -377,11 +414,23 @@ async function closeDb() {
   await sql.close();
 }
 
+/**
+ * النسخة اليومية تحمل اسم قاعدتها.
+ *
+ * كانت كلها "app_<التاريخ>.db" مهما كانت القاعدة، فصارت نسخةُ قاعدة اختبار
+ * تجلس في المجلد نفسه بجوار نسخ الشركة، لا يميّزها اسمٌ ولا شيء — ولو
+ * استُرجعت يوماً بالغلط لحلّت ثلاثة حسابات وهمية محلّ عمل الشركة كله.
+ * الآن: app_ للقاعدة الأصلية، و test_ و preview_ لما عداها.
+ */
 function writeBackup(dir, stamp, keep) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const target = path.join(dir, `app_${stamp}.db`);
+  const base = path.basename(sql.DB_FILE).replace(/\.db$/i, '') || 'app';
+  const target = path.join(dir, `${base}_${stamp}.db`);
   if (!fs.existsSync(target)) fs.copyFileSync(sql.DB_FILE, target);
-  const old = fs.readdirSync(dir).filter((f) => /^app_\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
+
+  // التنظيف يحذف من هذه العائلة وحدها — لا يمسّ نسخ قاعدة أخرى
+  const re = new RegExp('^' + base + '_\\d{4}-\\d{2}-\\d{2}\\.db$');
+  const old = fs.readdirSync(dir).filter((f) => re.test(f)).sort();
   for (const f of old.slice(0, Math.max(old.length - keep, 0)))
     fs.rmSync(path.join(dir, f), { force: true });
   return target;

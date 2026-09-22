@@ -301,6 +301,7 @@ app.use('/api/owner', require('./src/routes/owner'));
 app.use('/api/integrations', require('./src/routes/integrations'));
 app.use('/api/roles', require('./src/routes/roles'));
 app.use('/api/results', require('./src/routes/results'));
+app.use('/api/referrals', require('./src/routes/referrals'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/users', require('./src/routes/users'));

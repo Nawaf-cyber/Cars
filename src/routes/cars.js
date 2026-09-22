@@ -47,6 +47,20 @@ function canTouchCar(user, car) {
   return A.isManagerLevel(user) || car.assigned_to === user.id;
 }
 
+/**
+ * القراءة أوسع من الكتابة بحالة واحدة: زميل التواصل.
+ *
+ * أُحيلت إليه السيارة ليتصل، فيحتاج أن يقرأ بمن يتصل وبكم، وماذا قيل في
+ * المحاولات السابقة. ولا يملك عليها شيئاً غير ذلك — كل كتابة تمرّ من
+ * canTouchCar وحدها، فتبقى ممنوعة عليه.
+ */
+async function referredToMe(user, carId) {
+  return !!(await db.prepare(`
+    SELECT 1 FROM referrals
+    WHERE car_id=? AND helper_id=? AND status IN ('مُرسَل','مفتوح','وصلت النتيجة')`)
+    .get(carId, user.id));
+}
+
 // يقرأ اللوحة من الطلب: إمّا حروف وأرقام منفصلة (النموذج الجديد) أو نصاً كاملاً.
 // الإدخال اليدوي صارم: لا تُقبل لوحة ناقصة الحروف أو الأرقام.
 function readPlate(b) {
@@ -137,11 +151,17 @@ router.get('/:id', A.requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const car = (await db.prepare(`${CAR_SELECT} WHERE c.id = ?`).get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+
+  // زميل التواصل يقرأ السيارة المُحالة إليه، ولا يكتب عليها شيئاً
+  const mine = canTouchCar(req.user, car);
+  const referred = mine ? false : await referredToMe(req.user, id);
+  if (!mine && !referred) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
 
   const followUps = (await db.prepare(`
-    SELECT f.*, u.name AS user_name, u.emp_code
-    FROM follow_ups f LEFT JOIN users u ON u.id = f.user_id
+    SELECT f.*, u.name AS user_name, u.emp_code, v.name AS via_name
+    FROM follow_ups f
+    LEFT JOIN users u ON u.id = f.user_id
+    LEFT JOIN users v ON v.id = f.via_user_id
     WHERE f.car_id = ? ORDER BY f.id DESC`).all(id));
 
   // الصفوف المُرحَّلة قبل وجود عمود source ما زالت تحمل بادئة نصّية — نزيلها
@@ -160,7 +180,8 @@ router.get('/:id', A.requireAuth, async (req, res) => {
     ORDER BY CASE ch.status WHEN 'متأخر' THEN 0 WHEN 'مرسل' THEN 1 ELSE 2 END,
              ch.issued_at DESC, ch.id DESC`).all(id)) : [];
 
-  res.json({ car, follow_ups: followUps, payments, charges });
+  // read_only يقول للواجهة: اعرض ولا تفتح نموذجاً — والخادم يمنع أصلاً
+  res.json({ car, follow_ups: followUps, payments, charges, read_only: referred || undefined });
 });
 
 // ================= إضافة سيارة (المدير فقط) =================
@@ -388,9 +409,34 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   const channel = U.CHANNELS.includes(b.channel) ? b.channel : 'اتصال';
   const reached = b.reached === undefined ? rc.reached : (b.reached ? 1 : 0);
 
+  /* اعتماد نتيجة وصلت من زميل تواصل.
+     المتابعة تُقيَّد باسمها هي — فهي من راجعها وحفظها — وتحمل معها اسمَه
+     ووقتَ مكالمته الحقيقي. اسمان لا اسم واحد: لا يضيع عمله، ولا يُنسب
+     إليها اتصالٌ لم تجرِه. */
+  let ref = null;
+  if (b.referral_id) {
+    ref = await db.prepare('SELECT * FROM referrals WHERE id=?').get(parseInt(b.referral_id, 10));
+    if (!ref || Number(ref.car_id) !== id)
+      return res.status(400).json({ error: 'طلب التواصل غير موجود على هذه السيارة' });
+    if (Number(ref.owner_id) !== req.user.id && !A.isManagerLevel(req.user))
+      return res.status(403).json({ error: 'هذا الطلب ليس لك' });
+    if (ref.status !== 'وصلت النتيجة')
+      return res.status(400).json({ error: 'لم تصل نتيجة هذا الطلب بعد' });
+  }
+
   const info = (await db.prepare(`
-    INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, promise_date, channel, created_at)
-    VALUES (?,?,?,?,?,?,?,?)`).run(id, req.user.id, reached, rc.code, note || null, promise, channel, U.now()));
+    INSERT INTO follow_ups (car_id, user_id, reached, result_code, result_note, promise_date,
+                            channel, via_user_id, contacted_at, referral_id, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id, req.user.id, reached, rc.code, note || null, promise, channel,
+    ref ? ref.helper_id : null, ref ? ref.contacted_at : null, ref ? ref.id : null, U.now()));
+
+  if (ref) {
+    await db.prepare(`
+      UPDATE referrals SET status='مُعتمد', follow_up_id=?, closed_at=?, closed_by=?,
+             close_reason='اعتمدتها صاحبة الملف' WHERE id=?`)
+      .run(Number(info.lastInsertRowid), U.now(), req.user.id, ref.id);
+  }
 
   // حالة السيارة تتبع النتيجة — والربط محفوظ مع النتيجة نفسها لا هنا
   const status = RES.nextStatus(rc, car.status);

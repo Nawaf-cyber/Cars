@@ -89,6 +89,10 @@ const CAPABILITIES = [
   { key: 'followups.create',   group: 'المتابعة',  label: 'تسجيل متابعة' },
   { key: 'followups.delete',   group: 'المتابعة',  label: 'حذف متابعة' },
   { key: 'results.manage',     group: 'المتابعة',  label: 'تعديل قائمة نتائج المتابعة' },
+  /* إحالة التواصل: مفتاحان منفصلان عمداً — من يُحيل غير من يتصل.
+     مطفآن للجميع افتراضياً، فالشركة وحدها تعرف من يفعل ماذا. */
+  { key: 'referrals.request',  group: 'المتابعة',  label: 'إحالة سيارة إلى زميل للتواصل' },
+  { key: 'referrals.handle',   group: 'المتابعة',  label: 'تنفيذ طلبات التواصل والردّ عليها' },
   { key: 'payments.create',    group: 'المتابعة',  label: 'تسجيل دفعة' },
   { key: 'payments.delete',    group: 'المتابعة',  label: 'حذف دفعة' },
 
@@ -128,6 +132,7 @@ const DEFAULTS = {
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
     'cars.assign', 'cars.import',
     'followups.create', 'followups.delete', 'results.manage',
+    'referrals.request', 'referrals.handle',
     'payments.create', 'payments.delete',
     'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',
@@ -139,6 +144,9 @@ const DEFAULTS = {
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
     'cars.assign', 'cars.import',
     'followups.create', 'followups.delete', 'results.manage',
+    /* المدير يحملهما ليستطيع منحهما: لا أحد يمنح صلاحية لا يملكها، ولولا
+       ذلك لتعذّر تشغيل الإحالة أصلاً إلا من خارج الشركة. */
+    'referrals.request', 'referrals.handle',
     'payments.create', 'payments.delete',
     'charges.view', 'charges.settle', 'charges.create', 'charges.edit', 'charges.delete',
     'employees.view', 'employees.add', 'employees.edit', 'employees.delete',

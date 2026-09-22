@@ -232,6 +232,7 @@ async function boot() {
   fillSelect($('#f-status'), S.consts.car_statuses, 'كل الحالات');
   fillSelect($('#f-type'), S.consts.car_types, 'كل الأنواع');
   if (isMgr()) await loadEmployees();
+  await loadHelpers();     // زملاء التواصل المعتمدون لي — للإحالة الجماعية
   $('#dash-from').value = $('#perf-from').value = monthStart();
   $('#dash-to').value = $('#perf-to').value = todayISO();
   switchTab('dashboard');
@@ -406,7 +407,8 @@ async function loadCars() {
   catch (e) { tb.innerHTML = `<tr><td colspan="14" class="empty">${esc(e.message)}</td></tr>`; return; }
 
   Object.assign(S.cars, { total: d.total, pages: d.pages });
-  const canAssign = cap('cars.assign');
+  // خانة التحديد تلزم للإسناد وللإحالة معاً — أيّهما مُنح كفى
+  const canAssign = cap('cars.assign') || cap('referrals.request');
   const showArrears = cap('charges.view');
   const canState = cap('cars.set_state');
   const cols = 12 + (canAssign ? 1 : 0) + (showArrears ? 1 : 0);
@@ -485,11 +487,16 @@ async function loadCars() {
   const size = $('#pg-size');
   if (size) size.onchange = () => { S.cars.limit = +size.value; S.cars.page = 1; loadCars(); };
   renderBulk();
+
+  // قسما الإحالة يتبعان الجدول: يُحدَّثان معه ولا يُحمَّلان لمن لا يملكهما
+  loadReferralsOut();
+  loadReferralsIn();
 }
 
 function renderBulk() {
   const bar = $('#bulk-bar');
-  if (!cap('cars.assign') || !S.selected.size) return bar.classList.add('hidden');
+  const may = cap('cars.assign') || cap('referrals.request');
+  if (!may || !S.selected.size) return bar.classList.add('hidden');
   bar.classList.remove('hidden');
   $('#bulk-count').textContent = `${S.selected.size} سيارة محددة`;
 }
@@ -512,6 +519,314 @@ $('#bulk-assign').onclick = async () => {
   } catch (e) { toast(e.message, 'bad'); }
 };
 
+/* ============================================================
+   إحالة التواصل
+   ------------------------------------------------------------
+   الزميل لا يكتب على سيارتها: يقرأ، ويتصل، ويُرسل النتيجة.
+   وهي تراجعها وتعتمدها فتُقيَّد المتابعة باسمها.
+   ============================================================ */
+
+$('#bulk-refer').onclick = async () => {
+  const helper = $('#bulk-helper').value;
+  if (!helper) return toast('اختر زميل التواصل أولاً', 'warn');
+  const count = S.selected.size;
+
+  const b = openModal(`إحالة ${count} سيارة للتواصل`, `
+    <form id="refer-form">
+      <label>ماذا تريدين أن يُقال للسائق؟
+        <textarea name="note" rows="3"
+          placeholder="مثال: ذكّره بوعده يوم ١٥ واسأله متى يقدر يمر المكتب…"></textarea>
+        <small class="muted">تصل مع الطلب. اتركيها فارغة إن لم تكن هناك رسالة معيّنة.</small>
+      </label>
+      <div class="modal-actions"><button class="btn primary">أرسل الطلب</button></div>
+    </form>`, 'narrow');
+
+  $('#refer-form', b).onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('/referrals', { method: 'POST', body: {
+        car_ids: [...S.selected], helper_id: +helper,
+        note: new FormData(e.target).get('note') } });
+      toast(r.skipped.length
+        ? `أُحيلت ${r.sent} سيارة · تُجوهل ${r.skipped.length}`
+        : `أُحيلت ${r.sent} سيارة`, 'ok');
+      closeModal();
+      S.selected.clear();
+      loadCars(); loadReferralsOut();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  };
+};
+
+/** يملأ قائمة زملاء التواصل في شريط التحديد — مرة عند الدخول. */
+async function loadHelpers() {
+  const sel = $('#bulk-helper');
+  if (!sel || !cap('referrals.request')) return;
+  try {
+    const d = await api('/referrals/helpers');
+    sel.innerHTML = '<option value="">— زميل التواصل —</option>' +
+      d.helpers.map((h) => `<option value="${h.id}">${esc(h.name)}${
+        h.open_now ? ` (${num(h.open_now)} عنده)` : ''}</option>`).join('');
+    if (!d.helpers.length)
+      sel.innerHTML = '<option value="">— لا يوجد زملاء معتمدون —</option>';
+  } catch { /* بلا صلاحية أو بلا شبكة — الشريط يبقى كما هو */ }
+}
+
+/* ----- ما أرسلتُه أنا ----- */
+async function loadReferralsOut() {
+  const box = $('#ref-out');
+  if (!box || !cap('referrals.request')) return;
+  let d;
+  try { d = await api('/referrals/mine'); }
+  catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+
+  /* القسم جزء من الصفحة لا شيء يظهر ويختفي: من يملك الإحالة يراه دائماً،
+     ويعرف من فراغه أن لا طلب معلّقاً — وهذه معلومة أيضاً. */
+  if (!d.referrals.length) {
+    box.innerHTML = `<p class="muted">لا توجد طلبات معلّقة.
+      حدّد سيارات من الجدول أعلاه ثم اضغط «أحِل للتواصل».</p>`;
+    return;
+  }
+
+  box.innerHTML = `
+    ${d.waiting_review ? `<div class="alert warn" style="margin-bottom:.8rem">
+      <b>وصلتك ${num(d.waiting_review)} نتيجة.</b> راجعيها واعتمديها لتُسجَّل المتابعة
+      وتتحرك السيارة.</div>` : ''}
+    <div class="table-wrap"><table class="data">
+      <thead><tr>
+        <th>اللوحة</th><th>السائق</th><th>الزميل</th><th>الحالة</th>
+        <th>النتيجة التي وصلت</th><th>متى</th><th></th>
+      </tr></thead>
+      <tbody>${d.referrals.map(refOutRow).join('')}</tbody>
+    </table></div>`;
+
+  $$('#ref-out [data-approve]').forEach((x) => x.onclick = () =>
+    approveReferral(d.referrals.find((r) => r.id === +x.dataset.approve)));
+
+  $$('#ref-out [data-cancel]').forEach((x) => x.onclick = () =>
+    confirmBox('إلغاء هذا الطلب؟ لن يصل الزميل شيء بعدها.', async () => {
+      try { await api('/referrals/' + x.dataset.cancel, { method: 'DELETE' });
+        toast('أُلغي الطلب', 'ok'); loadReferralsOut(); }
+      catch (e) { toast(e.message, 'bad'); }
+    }));
+}
+
+function refOutRow(r) {
+  const badge = { 'وصلت النتيجة': 'ok', 'معتذر': 'bad', 'مفتوح': 'warn' }[r.status] || '';
+  return `<tr>
+    <td><span class="plate">${esc(r.plate)}</span></td>
+    <td>${esc(r.driver_name || '—')}</td>
+    <td>${esc(r.helper_name)}</td>
+    <td><span class="badge ${badge}">${esc(r.status)}</span>
+      ${r.status === 'مفتوح' && r.opened_at
+        ? `<br><small class="muted">رآه ${dt(r.opened_at)}</small>` : ''}
+      ${r.status === 'مُرسَل'
+        ? '<br><small class="muted">لم يفتحه بعد</small>' : ''}</td>
+    <td style="white-space:normal;max-width:320px">
+      ${r.reply_result ? `<b>${esc(r.reply_result)}</b>${
+        r.reply_note ? `<br><span class="muted">${esc(r.reply_note)}</span>` : ''}${
+        r.reply_promise ? `<br><span class="badge warn">وعد: ${dOnly(r.reply_promise)}</span>` : ''}`
+      : r.close_reason ? `<span class="muted">${esc(r.close_reason)}</span>`
+      : '<span class="muted">بانتظار الزميل</span>'}
+    </td>
+    <td>${r.replied_at ? dt(r.replied_at) : dt(r.created_at)}</td>
+    <td>
+      ${r.status === 'وصلت النتيجة'
+        ? `<button class="btn sm primary" data-approve="${r.id}">اعتمدي وسجّلي</button>`
+        : ''}
+      ${r.status === 'مُرسَل' || r.status === 'مفتوح'
+        ? `<button class="link" data-cancel="${r.id}">إلغاء</button>` : ''}
+    </td>
+  </tr>`;
+}
+
+/**
+ * الاعتماد: نفتح نموذج المتابعة مملوءاً بما أرسله، فتراجع وتعدّل وتحفظ.
+ * الحفظ يمرّ بمسار المتابعات نفسه — لا باب ثانٍ لكتابة المتابعات.
+ */
+function approveReferral(r) {
+  if (!r) return;
+  const codes = S.consts.result_codes;
+
+  const b = openModal('اعتماد نتيجة التواصل', `
+    <div class="alert info" style="margin-bottom:.8rem">
+      <b>${esc(r.helper_name)}</b> اتصل على <b>${esc(r.driver_name || 'السائق')}</b>
+      ${r.contacted_at ? ` — ${dt(r.contacted_at)}` : ''}<br>
+      النتيجة كما أرسلها: <b>${esc(r.reply_result || '—')}</b>
+      ${r.reply_note ? `<br>«${esc(r.reply_note)}»` : ''}
+    </div>
+    <form id="approve-form">
+      <label>النتيجة
+        <select name="result_code" required>
+          ${codes.map((x) => `<option value="${esc(x.code)}"
+            ${x.code === r.reply_result ? 'selected' : ''}>${esc(x.code)}</option>`).join('')}
+        </select>
+      </label>
+      <div class="form-grid">
+        <label>وسيلة التواصل
+          <select name="channel">${S.consts.channels.map((ch) =>
+            `<option ${ch === r.reply_channel ? 'selected' : ''}>${esc(ch)}</option>`).join('')}</select>
+        </label>
+        <label>تاريخ الوعد بالسداد
+          <input name="promise_date" type="date" value="${r.reply_promise ? r.reply_promise.slice(0, 10) : ''}">
+        </label>
+      </div>
+      <label>التفاصيل / السبب
+        <textarea name="result_note" rows="3">${esc(r.reply_note || '')}</textarea>
+        <small class="muted">عدّلي ما شئتِ قبل الحفظ — ما يُحفظ هو ما تكتبينه أنتِ.</small>
+      </label>
+      <div class="modal-actions"><button class="btn primary">اعتمدي وسجّلي المتابعة</button></div>
+    </form>`);
+
+  $('#approve-form', b).onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target));
+    try {
+      await api(`/cars/${r.car_id}/follow-ups`, { method: 'POST', body: { ...fd, referral_id: r.id } });
+      toast('اعتُمدت وسُجّلت المتابعة', 'ok');
+      closeModal();
+      loadCars(); loadReferralsOut();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  };
+}
+
+/* ----- ما أُحيل إليّ ----- */
+async function loadReferralsIn() {
+  const box = $('#ref-in');
+  if (!box || !cap('referrals.handle')) return;
+  let d;
+  try { d = await api('/referrals/inbox'); }
+  catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+
+  if (!d.referrals.length) {
+    box.innerHTML = `<p class="muted">لا توجد سيارات محالة إليك الآن —
+      تظهر هنا فور أن يُحيل إليك زميل سيارةً للتواصل.</p>`;
+    return;
+  }
+
+  box.innerHTML = `
+    ${d.todo ? `<div class="alert warn" style="margin-bottom:.8rem">
+      <b>${num(d.todo)} سيارة تنتظر اتصالك.</b></div>` : ''}
+    <div class="table-wrap"><table class="data">
+      <thead><tr>
+        <th>اللوحة</th><th>السائق</th><th>رقم التواصل</th><th>المتبقي</th>
+        <th>من أحالها</th><th>المطلوب</th><th>الحالة</th><th></th>
+      </tr></thead>
+      <tbody>${d.referrals.map(refInRow).join('')}</tbody>
+    </table></div>`;
+
+  /* فتحُه للطلب يُسجَّل: بدونه تبقى صاحبة الملف لا تعرف أهو لم يره بعد،
+     أم رآه ولم يتصل — وهما حالتان تُعالَجان بطريقتين مختلفتين. */
+  $$('#ref-in [data-read]').forEach((x) => x.onclick = async () => {
+    const r = d.referrals.find((z) => z.car_id === +x.dataset.read);
+    if (r && r.status === 'مُرسَل') { await markSeen(r.id); loadReferralsIn(); }
+    openCar(+x.dataset.read);
+  });
+  $$('#ref-in [data-reply]').forEach((x) => x.onclick = async () => {
+    const r = d.referrals.find((z) => z.id === +x.dataset.reply);
+    if (r && r.status === 'مُرسَل') await markSeen(r.id);
+    replyForm(r);
+  });
+  $$('#ref-in [data-decline]').forEach((x) => x.onclick = () =>
+    declineForm(d.referrals.find((r) => r.id === +x.dataset.decline)));
+}
+
+/** يُعلم الخادم أن الزميل رأى الطلب — بلا ضجيج إن تعذّر. */
+async function markSeen(id) {
+  try { await api('/referrals/' + id + '/open', { method: 'POST' }); } catch { /* لا يضرّ */ }
+}
+
+function refInRow(r) {
+  const sent = r.status === 'وصلت النتيجة';
+  return `<tr${sent ? ' style="opacity:.6"' : ''}>
+    <td><span class="plate">${esc(r.plate)}</span></td>
+    <td>${esc(r.driver_name || '—')}</td>
+    <td class="num">${r.driver_phone
+      ? `<a href="tel:${esc(r.driver_phone)}">${esc(r.driver_phone)}</a>`
+      : '<span class="badge bad">لا يوجد</span>'}</td>
+    <td class="num">${num(r.remaining)}</td>
+    <td>${esc(r.owner_name)}</td>
+    <td style="white-space:normal;max-width:280px">${
+      r.note ? esc(r.note) : '<span class="muted">—</span>'}</td>
+    <td>${sent ? '<span class="badge ok">أُرسلت النتيجة</span>'
+               : `<span class="badge">${esc(r.status)}</span>`}</td>
+    <td>
+      <button class="link" data-read="${r.car_id}">اقرأ السيارة</button>
+      ${sent ? '' : `<button class="btn sm primary" data-reply="${r.id}"
+          style="margin-right:.5rem">أرسل النتيجة</button>
+        <button class="link" data-decline="${r.id}" style="margin-right:.5rem">اعتذار</button>`}
+    </td>
+  </tr>`;
+}
+
+function replyForm(r) {
+  if (!r) return;
+  const codes = S.consts.result_codes;
+
+  const b = openModal(`نتيجة التواصل — ${r.plate}`, `
+    <p class="muted">تصل هذه النتيجة إلى <b>${esc(r.owner_name)}</b> لتراجعها وتعتمدها.
+      لا تتحرك السيارة قبل اعتمادها.</p>
+    ${r.note ? `<div class="alert info" style="margin:.6rem 0">المطلوب منك: ${esc(r.note)}</div>` : ''}
+    <form id="reply-form">
+      <label>النتيجة *
+        <select name="result_code" required>
+          <option value="">— اختر النتيجة —</option>
+          ${codes.map((x) => `<option value="${esc(x.code)}">${esc(x.code)}</option>`).join('')}
+        </select>
+      </label>
+      <div class="form-grid">
+        <label>وسيلة التواصل
+          <select name="channel">${S.consts.channels.map((c) => `<option>${esc(c)}</option>`).join('')}</select>
+        </label>
+        <label id="rep-promise-wrap" class="hidden">تاريخ الوعد بالسداد
+          <input name="promise_date" type="date" min="${todayISO()}">
+        </label>
+      </div>
+      <label>ماذا قال السائق؟
+        <textarea name="note" rows="3" placeholder="انقل كلامه كما هو…"></textarea>
+      </label>
+      <div class="modal-actions"><button class="btn primary">أرسل النتيجة</button></div>
+    </form>`);
+
+  const f = $('#reply-form', b);
+  f.result_code.onchange = () => {
+    const x = codes.find((c) => c.code === f.result_code.value);
+    $('#rep-promise-wrap', b).classList.toggle('hidden', !x?.needsPromise);
+    f.promise_date.required = !!x?.needsPromise;
+    f.note.required = !!x?.needsNote;
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api(`/referrals/${r.id}/reply`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      toast('وصلت النتيجة لصاحبة الملف', 'ok');
+      closeModal();
+      loadReferralsIn();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  };
+}
+
+function declineForm(r) {
+  if (!r) return;
+  const b = openModal(`اعتذار — ${r.plate}`, `
+    <form id="decline-form">
+      <label>السبب
+        <input name="reason" placeholder="مثال: الرقم لا يرد منذ يومين" maxlength="200">
+        <small class="muted">يصل السبب لصاحبة الملف، فتعرف ما تفعل بدل أن تنتظر.</small>
+      </label>
+      <div class="modal-actions"><button class="btn danger">أعتذر عن هذا الطلب</button></div>
+    </form>`, 'narrow');
+
+  $('#decline-form', b).onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api(`/referrals/${r.id}/decline`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      toast('أُرسل اعتذارك', 'ok');
+      closeModal();
+      loadReferralsIn();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  };
+}
+
 /* ---------------- نافذة السيارة ---------------- */
 async function openCar(id) {
   const b = openModal('تفاصيل السيارة', '<p><span class="spin"></span> جارٍ التحميل…</p>', 'wide');
@@ -523,13 +838,21 @@ async function openCar(id) {
 
 function renderCar(b, d) {
   const c = d.car;
-  const canDelPay = cap('payments.delete');
+  /* سيارة أُحيلت إليّ للتواصل: أقرؤها ولا أكتب عليها.
+     الإخفاء هنا مجاملةٌ للعين — المنع الحقيقي في الخادم، فكل كتابة تمرّ
+     بفحص الإسناد وتُرفض مهما فعلت الواجهة. */
+  const ro = !!d.read_only;
+  const canDelPay = !ro && cap('payments.delete');
   $('#modal-title').innerHTML = `<span class="plate">${esc(c.plate)}</span> — ${esc(c.driver_name || 'بدون اسم سائق')} ${statusBadge(c.status)}`;
 
   const progress = c.total_amount > 0 ? Math.min((c.paid_amount / c.total_amount) * 100, 100) : 0;
   const late = c.promise_date && c.promise_date < todayISO() && c.status !== 'مسدد';
 
   b.innerHTML = `
+    ${ro ? `<div class="alert info" style="margin-bottom:.8rem">
+      <b>سيارة أُحيلت إليك للتواصل.</b> اقرأ ما تحتاجه قبل الاتصال، ثم أرسل النتيجة
+      من قائمة «بالنيابة». لا تُعدَّل بياناتها من هنا — صاحبة الملف هي من تعدّل.
+    </div>` : ''}
     <div class="detail-grid">
       ${dcell('نوع السيارة', esc(c.car_type))}
       ${dcell('رقم التواصل', c.driver_phone ? `<a href="tel:${esc(c.driver_phone)}">${esc(c.driver_phone)}</a>` : '<span class="badge bad">لا يوجد</span>')}
@@ -554,12 +877,12 @@ function renderCar(b, d) {
       <button data-ct="follow" class="active">المتابعات (${d.follow_ups.length})</button>
       <button data-ct="pay">الدفعات (${d.payments.length})</button>
       ${cap('charges.view') ? `<button data-ct="charge">المتأخرات (${d.charges.length})</button>` : ''}
-      <button data-ct="edit">تعديل البيانات</button>
+      ${ro ? '' : '<button data-ct="edit">تعديل البيانات</button>'}
     </div>
     <div id="ct-follow"></div>
     <div id="ct-pay" class="hidden"></div>
     <div id="ct-charge" class="hidden"></div>
-    <div id="ct-edit" class="hidden"></div>`;
+    ${ro ? '' : '<div id="ct-edit" class="hidden"></div>'}`;
 
   $('#car-tabs', b).onclick = (e) => {
     const t = e.target.closest('button'); if (!t) return;
@@ -570,7 +893,7 @@ function renderCar(b, d) {
   /* ----- تبويب المتابعات ----- */
   const codes = S.consts.result_codes;
   $('#ct-follow', b).innerHTML = `
-    ${cap('followups.create') ? `<form id="fu-form" class="panel" style="background:#f8fafd">
+    ${!ro && cap('followups.create') ? `<form id="fu-form" class="panel" style="background:#f8fafd">
       <h3 style="margin-bottom:.6rem">تسجيل محاولة تواصل جديدة</h3>
       <div class="form-grid">
         <label>النتيجة
@@ -593,25 +916,29 @@ function renderCar(b, d) {
     </form>` : ''}
     <ul class="timeline">${d.follow_ups.map(fuItem).join('') || '<p class="muted">لا توجد متابعات مسجّلة — سجّل أول محاولة تواصل.</p>'}</ul>`;
 
+  /* النموذج قد لا يكون موجوداً أصلاً: دورٌ بلا صلاحية تسجيل متابعة، أو
+     سيارة مُحالة للقراءة. وبلا هذا الفحص تنهار النافذة كلها صامتةً. */
   const fuForm = $('#fu-form', b);
-  const sel = fuForm.result_code;
-  sel.onchange = () => {
-    const r = codes.find((x) => x.code === sel.value);
-    $('#fu-promise-wrap', b).classList.toggle('hidden', !r?.needsPromise);
-    fuForm.promise_date.required = !!r?.needsPromise;
-    fuForm.result_note.required = !!r?.needsNote;
-    $('#fu-note-wrap', b).querySelector('textarea').placeholder =
-      r?.needsNote ? 'إلزامي — اكتب السبب' : 'اكتب ما قاله السائق بالضبط…';
-  };
-  fuForm.onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = Object.fromEntries(new FormData(e.target));
-    try {
-      await api(`/cars/${c.id}/follow-ups`, { method: 'POST', body: fd });
-      toast('تم تسجيل المتابعة', 'ok');
-      openCar(c.id); loadCars();
-    } catch (ex) { toast(ex.message, 'bad'); }
-  };
+  if (fuForm) {
+    const sel = fuForm.result_code;
+    sel.onchange = () => {
+      const r = codes.find((x) => x.code === sel.value);
+      $('#fu-promise-wrap', b).classList.toggle('hidden', !r?.needsPromise);
+      fuForm.promise_date.required = !!r?.needsPromise;
+      fuForm.result_note.required = !!r?.needsNote;
+      $('#fu-note-wrap', b).querySelector('textarea').placeholder =
+        r?.needsNote ? 'إلزامي — اكتب السبب' : 'اكتب ما قاله السائق بالضبط…';
+    };
+    fuForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = Object.fromEntries(new FormData(e.target));
+      try {
+        await api(`/cars/${c.id}/follow-ups`, { method: 'POST', body: fd });
+        toast('تم تسجيل المتابعة', 'ok');
+        openCar(c.id); loadCars();
+      } catch (ex) { toast(ex.message, 'bad'); }
+    };
+  }
   $$('#ct-follow [data-delfu]', b).forEach((x) => x.onclick = () =>
     confirmBox('حذف هذه المتابعة نهائياً؟', async () => {
       try { await api('/cars/follow-ups/' + x.dataset.delfu, { method: 'DELETE' }); openCar(c.id); loadCars(); }
@@ -620,7 +947,7 @@ function renderCar(b, d) {
 
   /* ----- تبويب الدفعات ----- */
   $('#ct-pay', b).innerHTML = `
-    ${c.remaining > 0 && cap('payments.create') ? `
+    ${!ro && c.remaining > 0 && cap('payments.create') ? `
     <form id="pay-form" class="panel" style="background:#f8fafd">
       <h3 style="margin-bottom:.6rem">تسجيل دفعة (المتبقي ${num(c.remaining)})</h3>
       <div class="form-grid">
@@ -659,10 +986,12 @@ function renderCar(b, d) {
 
   /* ----- تبويب المتأخرات ----- */
   // ما كان الموظف يقرأه من برنامج آخر أثناء المكالمة، صار هنا أمامه
-  if (cap('charges.view')) renderCharges(b, c, d.charges);
+  if (cap('charges.view')) renderCharges(b, c, d.charges, ro);
 
   /* ----- تبويب التعديل ----- */
-  $('#ct-edit', b).innerHTML = carForm(c, cap('cars.edit')) + (cap('cars.delete')
+  const edit = $('#ct-edit', b);
+  if (!edit) return;                       // سيارة مُحالة: لا تبويب تعديل أصلاً
+  edit.innerHTML = carForm(c, cap('cars.edit')) + (cap('cars.delete')
     ? `<div class="modal-actions"><button class="btn danger" id="car-del">حذف السيارة نهائياً</button></div>` : '');
   bindCarForm($('#car-form', b), c.id, () => { openCar(c.id); loadCars(); });
   const del = $('#car-del', b);
@@ -721,11 +1050,12 @@ function chargeForm(h = {}) {
   </form>`;
 }
 
-function renderCharges(b, c, list) {
-  const canSettle = cap('charges.settle');
-  const canEdit = cap('charges.edit');
-  const canDel = cap('charges.delete');
-  const canAdd = cap('charges.create');
+function renderCharges(b, c, list, readOnly) {
+  // سيارة مُحالة للتواصل: تُقرأ مطالباتها ليعرف بكم يطالب، ولا تُمسّ
+  const canSettle = !readOnly && cap('charges.settle');
+  const canEdit = !readOnly && cap('charges.edit');
+  const canDel = !readOnly && cap('charges.delete');
+  const canAdd = !readOnly && cap('charges.create');
 
   const due = list.filter((h) => h.status !== 'تم الدفع').reduce((a, h) => a + h.amount, 0);
   const settled = list.filter((h) => h.status === 'تم الدفع').reduce((a, h) => a + h.amount, 0);
@@ -949,7 +1279,9 @@ function fuItem(f) {
   return `<li class="${cls}">
     <div class="t-head">
       <b>${esc(f.result_code)}</b>
-      <span class="t-meta">${esc(f.channel)} · ${esc(f.user_name || '—')} · ${dt(f.created_at)}
+      <span class="t-meta">${esc(f.channel)} · ${f.via_name
+        ? `اتصل: ${esc(f.via_name)} · سجّلها: ${esc(f.user_name || '—')}`
+        : esc(f.user_name || '—')} · ${dt(f.contacted_at || f.created_at)}
         ${canDel ? `<button class="link" data-delfu="${f.id}" style="margin-right:.5rem">حذف</button>` : ''}</span>
     </div>
     ${f.promise_date ? `<div class="t-note"><span class="badge warn">وعد بالسداد: ${dOnly(f.promise_date)}</span></div>` : ''}
@@ -1128,18 +1460,57 @@ async function loadUsers() {
     <td><span class="badge ${u.active ? 'ok' : 'bad'}">${u.active ? 'نشط' : 'موقوف'}</span></td>
     <td class="row gap">
       ${cap('employees.edit') ? `<button class="btn sm" data-edit="${u.id}">تعديل</button>
-      <button class="btn sm" data-pw="${u.id}">كلمة المرور</button>` : ''}
+      <button class="btn sm" data-pw="${u.id}">كلمة المرور</button>
+      <button class="btn sm" data-links="${u.id}">زملاء التواصل</button>` : ''}
       ${cap('employees.delete') && u.id !== S.user.id ? `<button class="btn sm danger" data-del="${u.id}">حذف</button>` : ''}
     </td></tr>`).join('');
 
   $$('#users-body [data-edit]').forEach((b) => b.onclick = () =>
     userForm(d.users.find((u) => u.id === +b.dataset.edit)));
   $$('#users-body [data-pw]').forEach((b) => b.onclick = () => resetPw(+b.dataset.pw));
+  $$('#users-body [data-links]').forEach((b) => b.onclick = () => linksForm(+b.dataset.links));
   $$('#users-body [data-del]').forEach((b) => b.onclick = () =>
     delUser(d.users.find((u) => u.id === +b.dataset.del)));
 }
 
 $('#btn-add-user').onclick = () => userForm(null);
+
+/**
+ * زملاء التواصل المعتمدون لموظف — يرسمها المدير وحده.
+ *
+ * والموظفة لا تُحيل إلا داخل هذه القائمة: المدير يرسم الخريطة، وهي تسير
+ * فيها بلا إذنٍ في كل مرة.
+ */
+async function linksForm(userId) {
+  let d;
+  try { d = await api('/referrals/links/' + userId); }
+  catch (e) { return toast(e.message, 'bad'); }
+
+  const b = openModal(`زملاء التواصل — ${d.user.name}`, `
+    <p class="muted">من يستطيع <b>${esc(d.user.name)}</b> أن يُحيل إليه سيارةً ليتصل بالسائق.
+      الزميل يقرأ السيارة ويُرسل النتيجة، ولا يعدّل شيئاً.</p>
+    ${!d.candidates.length ? `<div class="alert warn">لا يوجد من يملك صلاحية
+      «تنفيذ طلبات التواصل». شغّلها لمسمّى وظيفي من شاشة الصلاحيات أولاً.</div>` : `
+    <form id="links-form">
+      ${d.candidates.map((c) => `<label class="perm-row">
+        <input type="checkbox" value="${c.id}"
+          ${d.linked.some((l) => l.id === c.id) ? 'checked' : ''}>
+        <span>${esc(c.name)} <span class="muted">${esc(c.emp_code)}</span></span>
+      </label>`).join('')}
+      <div class="modal-actions"><button class="btn primary">حفظ</button></div>
+    </form>`}`);
+
+  const f = $('#links-form', b);
+  if (f) f.onsubmit = async (e) => {
+    e.preventDefault();
+    const ids = [...f.querySelectorAll('input:checked')].map((x) => +x.value);
+    try {
+      await api('/referrals/links/' + userId, { method: 'PUT', body: { helper_ids: ids } });
+      toast(ids.length ? `اعتُمد ${ids.length} زميلاً` : 'لا زملاء معتمدين', 'ok');
+      closeModal();
+    } catch (ex) { toast(ex.message, 'bad'); }
+  };
+}
 
 function userForm(u) {
   const isNew = !u;
@@ -1267,13 +1638,15 @@ $('#btn-distribute').onclick = () => {
    أداء الموظفين
    ============================================================ */
 $('#perf-refresh').onclick = loadPerformance;
+const refWatchHours = $('#ref-watch-hours');
+if (refWatchHours) refWatchHours.onchange = loadReferralWatch;
 
 async function loadPerformance() {
   const tb = $('#perf-body');
-  tb.innerHTML = '<tr><td colspan="14" class="empty"><span class="spin"></span> جارٍ التحميل…</td></tr>';
+  tb.innerHTML = '<tr><td colspan="15" class="empty"><span class="spin"></span> جارٍ التحميل…</td></tr>';
   let d;
   try { d = await api(`/reports/performance?from=${$('#perf-from').value}&to=${$('#perf-to').value}`); }
-  catch (e) { tb.innerHTML = `<tr><td colspan="14" class="empty">${esc(e.message)}</td></tr>`; return; }
+  catch (e) { tb.innerHTML = `<tr><td colspan="15" class="empty">${esc(e.message)}</td></tr>`; return; }
 
   $('#perf-note').textContent =
     `نقاط البونص = 40% تحصيل + 30% تغطية السيارات + 20% عدد المتابعات + 10% نسبة الرد. ` +
@@ -1288,6 +1661,8 @@ async function loadPerformance() {
       <td class="num">${num(e.cars_assigned)}</td>
       <td class="num">${e.untouched > 0 ? `<span class="badge bad">${num(e.untouched)}</span>` : '<span class="badge ok">0</span>'}</td>
       <td class="num">${num(e.follow_ups)}</td>
+      <td class="num">${e.on_behalf ? `<span class="badge info">${num(e.on_behalf)}</span>`
+        : '<span class="muted">—</span>'}</td>
       <td class="num">${num(e.cars_touched)}</td>
       <td><div class="row gap"><span class="bar ${e.coverage >= 80 ? 'ok' : e.coverage >= 40 ? 'warn' : 'bad'}" style="width:60px">
         <i style="width:${e.coverage}%"></i></span><small>${e.coverage}%</small></div></td>
@@ -1300,9 +1675,70 @@ async function loadPerformance() {
       <td><span class="badge ${sc}">${e.score}</span>
         <button class="link" data-detail="${e.id}" style="margin-right:.4rem">تفاصيل</button></td>
     </tr>`;
-  }).join('') || '<tr><td colspan="14" class="empty">لا يوجد موظفون</td></tr>';
+  }).join('') || '<tr><td colspan="15" class="empty">لا يوجد موظفون</td></tr>';
 
   $$('#perf-body [data-detail]').forEach((b) => b.onclick = () => perfDetail(+b.dataset.detail));
+  loadReferralWatch();
+}
+
+/* ----- إشراف الإحالة: نتيجةٌ وصلت ولم تُعتمد = مكالمة وقعت ولم تُقيَّد ----- */
+async function loadReferralWatch() {
+  const box = $('#ref-watch');
+  if (!box) return;
+  const hours = $('#ref-watch-hours')?.value || 24;
+
+  let d;
+  try { d = await api('/referrals/watch?hours=' + hours); }
+  catch (e) {
+    // لا صلاحية أو لا شبكة: نُخفي اللوحة بدل تركها تصرخ بخطأ
+    $('#ref-watch-panel').classList.add('hidden');
+    return;
+  }
+  $('#ref-watch-panel').classList.remove('hidden');
+
+  box.innerHTML = `
+    ${d.stale.length ? `
+      <div class="alert warn" style="margin-bottom:.8rem">
+        <b>${num(d.stale.length)} نتيجة وصلت ولم تُعتمد</b> منذ أكثر من ${arabicSpan(d.hours)}.
+      </div>
+      <div class="table-wrap"><table class="data">
+        <thead><tr><th>اللوحة</th><th>صاحبة الملف</th><th>من اتصل</th><th>وصلت النتيجة</th><th>منذ</th></tr></thead>
+        <tbody>${d.stale.map((r) => `<tr>
+          <td><span class="plate">${esc(r.plate)}</span></td>
+          <td>${esc(r.owner_name)}</td>
+          <td>${esc(r.helper_name)}</td>
+          <td>${dt(r.replied_at)}</td>
+          <td><span class="badge warn">${esc(sinceText(r.replied_at))}</span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`
+    : '<div class="alert ok">لا نتيجة متأخرة عن الاعتماد — كل ما وصل قُيِّد على سيارته.</div>'}
+
+    <h4 style="margin-top:1rem">المعلّق الآن عند كل زميل</h4>
+    ${d.open_by_helper.length ? `<div class="table-wrap"><table class="data">
+      <thead><tr><th>الزميل</th><th>طلبات تنتظر اتصاله</th></tr></thead>
+      <tbody>${d.open_by_helper.map((h) => `<tr>
+        <td>${esc(h.name)}</td>
+        <td class="num"><span class="badge ${Number(h.n) > 20 ? 'bad' : Number(h.n) > 10 ? 'warn' : ''}">${num(h.n)}</span></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`
+    : '<p class="muted">لا طلبات معلّقة عند أحد.</p>'}`;
+}
+
+/** "يوم" لا "1 يوم"، و"يومين" لا "2 يوم" — العربية تعدّ هكذا. */
+function arabicSpan(hours) {
+  const h = Number(hours);
+  if (h < 24) return h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : `${h} ساعات`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'يوم' : d === 2 ? 'يومين' : `${d} أيام`;
+}
+
+/** "منذ ٣ ساعات" — أوضح من طابع زمني حين يكون السؤال: كم تأخّر؟ */
+function sinceText(when) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(String(when).replace(' ', 'T')).getTime()) / 60000));
+  if (mins < 60) return num(mins) + ' دقيقة';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return num(hrs) + ' ساعة';
+  return num(Math.round(hrs / 24)) + ' يوم';
 }
 
 async function perfDetail(id) {

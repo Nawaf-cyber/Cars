@@ -108,13 +108,17 @@ router.get('/performance', P.needs('reports.performance'), async (req, res) => {
       (SELECT COUNT(DISTINCT f.car_id) FROM follow_ups f WHERE f.user_id=u.id AND f.created_at BETWEEN ? AND ?) AS cars_touched,
       (SELECT COUNT(*) FROM follow_ups f WHERE f.user_id=u.id AND f.reached=1 AND f.created_at BETWEEN ? AND ?) AS reached,
       (SELECT COUNT(*) FROM follow_ups f WHERE f.user_id=u.id AND f.result_code='وعد بالسداد' AND f.created_at BETWEEN ? AND ?) AS promises,
+      /* مكالمات أجراها عن زملائه: سيارة ليست له، اتصل بها ثم أرسل نتيجتها.
+         لا تدخل في "متابعات" لأن المتابعة تُقيَّد باسم صاحبة الملف — ولولا
+         هذا العمود لبقي عمله كله خارج التقرير. */
+      (SELECT COUNT(*) FROM referrals r WHERE r.helper_id=u.id AND r.replied_at BETWEEN ? AND ?) AS on_behalf,
       (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id AND c.status='مسدد') AS settled,
       (SELECT MAX(f.created_at) FROM follow_ups f WHERE f.user_id=u.id) AS last_activity,
       (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id
          AND NOT EXISTS (SELECT 1 FROM follow_ups f WHERE f.car_id=c.id)) AS untouched
     FROM users u WHERE u.role='employee'
     ORDER BY collected DESC, follow_ups DESC`)
-    .all(from, to, from, toEnd, from, toEnd, from, toEnd, from, toEnd));
+    .all(from, to, from, toEnd, from, toEnd, from, toEnd, from, toEnd, from, toEnd));
 
   const employees = rows.map((r) => {
     const coverage = r.cars_assigned ? Math.round((r.cars_touched / r.cars_assigned) * 100) : 0;

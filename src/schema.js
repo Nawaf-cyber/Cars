@@ -78,6 +78,13 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   promise_date TEXT,                              -- تاريخ الوعد بالسداد
   channel      TEXT    NOT NULL DEFAULT 'اتصال',  -- اتصال | واتساب | زيارة | رسالة
   source       TEXT,                              -- استيراد: مُرحَّلة من ملف، لا عمل موظف
+
+  -- المتابعة التي جاءت عن طريق زميل تواصل: هو اتصل، وصاحبة الملف كتبتها.
+  -- اسمان لا اسم واحد — وإلا نُسب إليها ما لم تفعله أو ضاع عمله هو.
+  via_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- من أجرى الاتصال فعلاً
+  contacted_at TEXT,                              -- وقت المكالمة لا وقت التقييد
+  referral_id  INTEGER,                           -- الطلب الذي نشأت عنه
+
   created_at   TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 CREATE INDEX IF NOT EXISTS idx_fu_car  ON follow_ups(car_id);
@@ -197,6 +204,56 @@ CREATE TABLE IF NOT EXISTS results (
 );
 
 CREATE INDEX IF NOT EXISTS idx_results_order ON results(active, sort_order);
+
+-- ============================================================================
+--  إحالة التواصل
+--  ----------------------------------------------------------------------------
+--  موظفة عندها سيارات ولا تتواصل مع السائق بنفسها، فتُحيل السيارة إلى زميل
+--  ليتصل. القاعدة الحاكمة: الزميل لا يكتب على سيارتها حرفاً. يقرأ، ويتصل،
+--  ويُرسل النتيجة. وهي تراجعها وتعتمدها فتُقيَّد المتابعة باسمها.
+--
+--  ولذلك الطلب ليس رسالة بل سجلّ بحالة: أُرسل، فُتح، وصلت نتيجته، اعتُمد.
+--  منه يُعرف من تأخر ومن ردّ، وكم بقي معلّقاً بلا اعتماد.
+-- ============================================================================
+
+-- من يجوز لها أن تُحيل إليه — يرسمها المدير، ولا تختار هي خارجها
+CREATE TABLE IF NOT EXISTS contact_links (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- صاحبة الملف
+  helper_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- زميل التواصل
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  UNIQUE (owner_id, helper_id)
+);
+CREATE INDEX IF NOT EXISTS idx_links_owner  ON contact_links(owner_id);
+CREATE INDEX IF NOT EXISTS idx_links_helper ON contact_links(helper_id);
+
+CREATE TABLE IF NOT EXISTS referrals (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  car_id        INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+  owner_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- من أحال
+  helper_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- إلى من
+  note          TEXT,                             -- ماذا تريد أن يُقال للسائق
+  status        TEXT    NOT NULL DEFAULT 'مُرسَل', -- مُرسَل|مفتوح|وصلت النتيجة|معتذر|مُعتمد|ملغى
+
+  -- الردّ: خبرٌ لا أكثر — لا يمسّ السيارة حتى تعتمده صاحبتها
+  reply_result  TEXT,                             -- النتيجة كما رآها
+  reply_note    TEXT,                             -- ما قاله السائق
+  reply_promise TEXT,                             -- تاريخ الوعد إن وُجد
+  reply_channel TEXT,                             -- اتصال | واتساب | …
+  contacted_at  TEXT,                             -- وقت المكالمة الحقيقي
+  replied_at    TEXT,
+
+  follow_up_id  INTEGER,                          -- المتابعة التي اعتمدتها
+  opened_at     TEXT,
+  closed_at     TEXT,
+  closed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  close_reason  TEXT,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_ref_helper ON referrals(helper_id, status);
+CREATE INDEX IF NOT EXISTS idx_ref_owner  ON referrals(owner_id, status);
+CREATE INDEX IF NOT EXISTS idx_ref_car    ON referrals(car_id, status);
 
 -- ---------- الصلاحيات كمفاتيح تُشغَّل وتُطفَأ ----------
 -- بدل تثبيت صلاحيات كل دور في الكود، تُخزَّن هنا ويغيّرها مشرف الموظفين بضغطة.

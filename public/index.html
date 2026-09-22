@@ -105,15 +105,17 @@
 
       <div class="bulk hidden" id="bulk-bar">
         <span id="bulk-count"></span>
-        <select id="bulk-emp"><option value="">— اختر موظفاً —</option></select>
+        <select id="bulk-emp" data-cap="cars.assign"><option value="">— اختر موظفاً —</option></select>
         <button class="btn primary sm" id="bulk-assign" data-cap="cars.assign">إسناد المحدد</button>
+        <select id="bulk-helper" data-cap="referrals.request"><option value="">— زميل التواصل —</option></select>
+        <button class="btn sm" id="bulk-refer" data-cap="referrals.request">أحِل للتواصل</button>
         <button class="btn ghost sm" id="bulk-clear">إلغاء التحديد</button>
       </div>
 
       <div class="table-wrap">
         <table class="data" id="cars-table">
           <thead><tr>
-            <th class="chk" data-cap="cars.assign"><input type="checkbox" id="chk-all"></th>
+            <th class="chk" data-cap="cars.assign|referrals.request"><input type="checkbox" id="chk-all"></th>
             <th data-sort="plate">رقم اللوحة</th>
             <th>النوع</th>
             <th data-sort="driver">السائق</th>
@@ -132,6 +134,25 @@
         </table>
       </div>
       <div class="row between wrap" id="cars-footer"></div>
+
+      <!-- ما أحلتُه لزملاء التواصل، وما وصلت نتيجته -->
+      <div class="panel" id="ref-out-panel" data-cap="referrals.request" style="margin-top:1.2rem">
+        <h3>طلبات التواصل التي أرسلتها</h3>
+        <p class="muted" style="margin-bottom:.8rem">
+          الزميل يتصل ويُرسل لك النتيجة. لا تُسجَّل المتابعة ولا تتحرك السيارة
+          حتى تراجعها وتعتمدها بنفسك.
+        </p>
+        <div id="ref-out"></div>
+      </div>
+
+      <!-- ما أُحيل إليّ للتواصل -->
+      <div class="panel" id="ref-in-panel" data-cap="referrals.handle" style="margin-top:1.2rem">
+        <h3>بالنيابة — سيارات أُحيلت إليك للتواصل</h3>
+        <p class="muted" style="margin-bottom:.8rem">
+          اتصل بالسائق ثم أرسل النتيجة لصاحبة الملف. لا تُعدَّل بياناتها من عندك.
+        </p>
+        <div id="ref-in"></div>
+      </div>
     </section>
 
     <!-- ---------- أداء الموظفين ---------- -->
@@ -149,12 +170,32 @@
         <table class="data" id="perf-table">
           <thead><tr>
             <th>#</th><th>الموظف</th><th>السيارات</th><th>لم تُمس</th>
-            <th>متابعات</th><th>سيارات تواصل معها</th><th>التغطية</th>
+            <th>متابعات</th><th>مكالمات نيابة</th><th>سيارات تواصل معها</th><th>التغطية</th>
             <th>نسبة الرد</th><th>وعود</th><th>حصّل بالفترة</th>
             <th>إجمالي التحصيل</th><th>المتبقي عليه</th><th>مسددة</th><th>نقاط البونص</th>
           </tr></thead>
           <tbody id="perf-body"></tbody>
         </table>
+      </div>
+
+      <!-- إشراف على الإحالة: ما وصل ولم يُعتمد، وما هو معلّق عند كل زميل -->
+      <div class="panel" id="ref-watch-panel" style="margin-top:1.2rem">
+        <div class="row between wrap" style="margin-bottom:.4rem">
+          <h3 style="margin:0">إشراف طلبات التواصل</h3>
+          <label class="inline">المتأخر عن
+            <select id="ref-watch-hours">
+              <option value="6">٦ ساعات</option>
+              <option value="24" selected>يوم</option>
+              <option value="48">يومين</option>
+              <option value="72">ثلاثة أيام</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted" style="margin-bottom:.8rem">
+          الزميل اتصل وأرسل النتيجة، وصاحبة الملف لم تعتمدها بعد — فالمكالمة وقعت
+          ولم تُقيَّد على السيارة. وهنا أيضاً ما هو معلّق عند كل زميل.
+        </p>
+        <div id="ref-watch"></div>
       </div>
     </section>
 
