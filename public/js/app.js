@@ -1486,19 +1486,46 @@ async function linksForm(userId) {
   try { d = await api('/referrals/links/' + userId); }
   catch (e) { return toast(e.message, 'bad'); }
 
+  const blocked = d.blocked_roles || [];
+
   const b = openModal(`زملاء التواصل — ${d.user.name}`, `
     <p class="muted">من يستطيع <b>${esc(d.user.name)}</b> أن يُحيل إليه سيارةً ليتصل بالسائق.
       الزميل يقرأ السيارة ويُرسل النتيجة، ولا يعدّل شيئاً.</p>
-    ${!d.candidates.length ? `<div class="alert warn">لا يوجد من يملك صلاحية
-      «تنفيذ طلبات التواصل». شغّلها لمسمّى وظيفي من شاشة الصلاحيات أولاً.</div>` : `
+
+    ${blocked.length ? `<div class="alert warn">
+      <b>${blocked.map((r) => esc(r.label)).join(' و')}</b>
+      ${blocked.length > 1 ? 'لا يملكون' : 'لا يملك'} مفتاح
+      <b>«تنفيذ طلبات التواصل»</b>، فلا يظهر أمامهم مربع الاختيار.
+      ${d.can_switch
+        ? `<div style="margin-top:.5rem">${blocked.map((r) =>
+            `<button class="btn sm" data-switch="${esc(r.key)}">شغّل المفتاح لـ«${esc(r.label)}»</button>`
+          ).join(' ')}</div>`
+        : '<br>شغّله من شاشة <b>الصلاحيات</b>، أو اطلبه ممن يملكها.'}
+    </div>` : ''}
+
     <form id="links-form">
-      ${d.candidates.map((c) => `<label class="perm-row">
+      ${d.candidates.map((c) => `<label class="perm-row ${c.eligible ? '' : 'perm-locked'}">
         <input type="checkbox" value="${c.id}"
-          ${d.linked.some((l) => l.id === c.id) ? 'checked' : ''}>
-        <span>${esc(c.name)} <span class="muted">${esc(c.emp_code)}</span></span>
-      </label>`).join('')}
+          ${d.linked.some((l) => l.id === c.id) ? 'checked' : ''}
+          ${c.eligible ? '' : 'disabled'}>
+        <span>${esc(c.name)} <span class="muted">${esc(c.emp_code)} · ${esc(c.role_label)}</span>
+          ${c.eligible ? '' : ' <span class="badge warn">لا يملك مفتاح التنفيذ</span>'}</span>
+      </label>`).join('') || '<p class="muted">لا يوجد موظفون آخرون.</p>'}
       <div class="modal-actions"><button class="btn primary">حفظ</button></div>
-    </form>`}`);
+    </form>`);
+
+  /* تشغيل المفتاح من هنا مباشرةً: الشاشة التي كشفت النقص هي أولى
+     الشاشات بإصلاحه — وإلا خرج المدير يبحث عنه في شاشة أخرى. */
+  $$('#modal-body [data-switch]', b).forEach((x) => x.onclick = async () => {
+    x.disabled = true;
+    try {
+      await api('/admin/permissions/' + x.dataset.switch, {
+        method: 'PUT', body: { changes: { 'referrals.handle': 1 } } });
+      toast('شُغّل المفتاح — صاروا يظهرون في القائمة', 'ok');
+      closeModal();
+      linksForm(userId);          // نعيد فتحها محدَّثة
+    } catch (ex) { toast(ex.message, 'bad'); x.disabled = false; }
+  });
 
   const f = $('#links-form', b);
   if (f) f.onsubmit = async (e) => {

@@ -65,16 +65,33 @@ router.get('/links/:userId', P.needs('employees.edit'), async (req, res) => {
     JOIN users u ON u.id = l.helper_id
     WHERE l.owner_id = ? ORDER BY u.name`).all(id);
 
-  /* المرشّحون: كل من يملك دورُه مفتاح التنفيذ — لا نعرض للمدير من لا
-     يستطيع الردّ أصلاً فيربطه ثم يتساءل لماذا لا يصله شيء. */
+  /* نعرض الجميع، ونقول عمّن لا يصلح: لماذا.
+     كنّا نُخفي من لا يملك مفتاح التنفيذ — فيفتح المدير القائمة فيجد
+     موظفيه غائبين بلا سبب ظاهر، ويظنّها عطلاً. الإخفاء بلا تفسير
+     أسوأ من الرفض المعلَّل. */
   const all = await db.prepare(
     "SELECT id, name, emp_code, role FROM users WHERE active=1 AND id<>? AND role<>'owner' ORDER BY name").all(id);
-  const candidates = all.filter((u) => P.capsOf(u)['referrals.handle']);
+
+  const candidates = all.map((u) => ({
+    id: u.id, name: u.name, emp_code: u.emp_code,
+    role_label: P.labelOf(u.role),
+    eligible: !!P.capsOf(u)['referrals.handle'],
+  }));
+
+  // المسمّيات التي يلزم تشغيل المفتاح لها ليصير أصحابها مؤهَّلين
+  const blocked = [...new Set(all.filter((u) => !P.capsOf(u)['referrals.handle']).map((u) => u.role))]
+    .map((key) => ({ key, label: P.labelOf(key) }));
 
   res.json({
     user: { id: user.id, name: user.name },
     linked,
-    candidates: candidates.map((u) => ({ id: u.id, name: u.name, emp_code: u.emp_code })),
+    candidates,
+    blocked_roles: blocked,
+    /* هل يملك من يفتح الشاشة أن يشغّل المفتاح بنفسه؟
+       نفس شرط شاشة المفاتيح حرفاً بحرف — فمدير الشركة يضبطها بـ roles.manage
+       وإن لم يملك features.manage، ولو سألنا عن الأول وحده لأخفينا عنه زرّاً
+       يعمل لو ضغطه. */
+    can_switch: P.can(req.user, 'features.manage') || P.can(req.user, 'roles.manage'),
   });
 });
 
