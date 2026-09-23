@@ -72,12 +72,24 @@ const USER_LINKS = [
   ['import_staging', 'user_id'], ['roles', 'created_by'],
   ['results', 'created_by'], ['follow_ups', 'via_user_id'],
   ['referrals', 'closed_by'],
+  // الأقسام: من بيده العهدة، ومن رفع الطلب، ومن سجّل الوثيقة
+  ['documents', 'created_by'], ['attendance', 'created_by'],
+  ['assets', 'holder_id'], ['assets', 'created_by'],
+  ['asset_moves', 'user_id'], ['asset_moves', 'created_by'],
+  ['subscriptions', 'responsible_id'], ['subscriptions', 'created_by'],
+  ['tickets', 'requester_id'], ['tickets', 'assignee_id'], ['ticket_notes', 'user_id'],
+  // الأرشفة: من أرشف
+  ['cars', 'archived_by'], ['user_archive', 'archived_by'],
 ];
 
 /* جداول تشير إلى users بـ ON DELETE CASCADE — أي أن حذف جدول المستخدمين
    لا يُفرغ أعمدتها بل يمحو صفوفها كلها. الإفراغ يُعالَج بالاسترجاع أعلاه،
    أما المحو فلا يُعالَج إلا بلقطة كاملة. فنأخذها. */
-const CASCADE_TABLES = ['contact_links', 'referrals'];
+/* salaries و payroll_items كانتا ناقصتين من هذه القائمة منذ إنشائهما —
+   فلو أُعيد بناء المستخدمين على قاعدةٍ فيها رواتب لمُحيت كلها. لم يقع لأن
+   جدول الرواتب فارغ عند الشركة، لا لأن شيئاً كان يمنعه. */
+const CASCADE_TABLES = ['contact_links', 'referrals', 'salaries', 'payroll_items', 'attendance',
+                        'user_archive'];
 
 /** لقطة كاملة بصفوف الجداول التي تموت مع المستخدمين. */
 async function snapshotCascades() {
@@ -189,6 +201,7 @@ async function init() {
   await migrateOpenRoles();               // يفتح الدور للأدوار المخصّصة
   await seedRoles();
   await seedResults();
+  await seedDocTypes();
   await migrateCars();
 }
 
@@ -376,6 +389,31 @@ async function seedResults() {
   }
 }
 
+/**
+ * أنواع الوثائق الأصلية — نقطة بداية تعدّلها الشركة بلا برمجة.
+ *
+ * لم تصلنا قائمة الشركة بعد، فهذه ما تتابعه أي شركة تأجير سعودية. ولأنها
+ * بيانات لا ثوابت: تُعاد تسميتها وتُطفأ ويُضاف إليها. و ON CONFLICT DO NOTHING
+ * يمنع أي ترقية لاحقة من إرجاع ما غيّرته الشركة.
+ */
+async function seedDocTypes() {
+  const TYPES = [
+    // [الكيان، النوع، ينبّه قبل كم يوماً]
+    ['employee', 'إقامة', 60], ['employee', 'رخصة قيادة', 30], ['employee', 'عقد عمل', 60],
+    ['employee', 'شهادة صحية', 30], ['employee', 'تأمين طبي', 30], ['employee', 'جواز سفر', 90],
+    ['car', 'استمارة', 30], ['car', 'تأمين المركبة', 30], ['car', 'فحص دوري', 30],
+    ['car', 'بطاقة تشغيل', 30],
+    ['asset', 'ضمان', 30], ['asset', 'عقد صيانة', 30],
+    ['subscription', 'تجديد الاشتراك', 14],
+  ];
+  const ins = sql.prepare(`
+    INSERT INTO doc_types (entity_kind, label, alert_days, sort_order, active, builtin, created_at)
+    VALUES (?,?,?,?,1,1,?) ON CONFLICT(entity_kind, label) DO NOTHING`);
+  const now = require('./util').now();
+  let order = 0;
+  for (const [kind, label, days] of TYPES) await ins.run(kind, label, days, order++, now);
+}
+
 /** أعمدة اللوحة المفصولة + إعادة احتساب المفاتيح بالصيغة الجديدة. */
 async function migrateCars() {
   const cols = new Set((await sql.prepare('PRAGMA table_info(cars)').all()).map((c) => c.name));
@@ -548,7 +586,7 @@ module.exports = {
   exec: (s) => sql.exec(s),
   transaction: (fn) => sql.transaction(fn),
   init, checkpoint, closeDb, autoBackup,
-  seedResults,                      // تحتاجها أدوات إعادة الضبط
+  seedResults, seedDocTypes,        // تحتاجها أدوات إعادة الضبط
   snapshotUsers, restoreUsers,      // شبكة أمان الحسابات — وأدوات الاسترجاع
   isRemote: sql.isRemote,
   DB_FILE: sql.DB_FILE,

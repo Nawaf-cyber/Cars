@@ -173,10 +173,11 @@ router.post('/', P.needs('referrals.request'), async (req, res) => {
     VALUES (?,?,?,?,'مُرسَل',?)`);
 
   for (const carId of ids) {
-    const car = await db.prepare('SELECT id, plate, assigned_to, status FROM cars WHERE id=?').get(carId);
+    const car = await db.prepare('SELECT id, plate, assigned_to, status, archived_at FROM cars WHERE id=?').get(carId);
     if (!car) { skipped.push({ id: carId, why: 'غير موجودة' }); continue; }
     if (!ownsCar(req.user, car)) { skipped.push({ id: carId, plate: car.plate, why: 'ليست لك' }); continue; }
     if (car.status === 'مسدد') { skipped.push({ id: carId, plate: car.plate, why: 'مسددة' }); continue; }
+    if (car.archived_at) { skipped.push({ id: carId, plate: car.plate, why: 'مؤرشفة' }); continue; }
     if (await liveReferral(carId)) {
       skipped.push({ id: carId, plate: car.plate, why: 'عليها طلب قائم' }); continue;
     }

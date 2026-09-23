@@ -21,7 +21,8 @@ function range(req) {
 router.get('/summary', A.requireAuth, async (req, res) => {
   const { from, to, toEnd } = range(req);
   const isMgr = A.isManagerLevel(req.user);
-  const scope = isMgr ? '1=1' : 'c.assigned_to = ' + req.user.id;
+  // المؤرشفة خارج كل رقم هنا — كل استعلام يقرأ هذا الشرط فيأخذها معه
+  const scope = 'c.archived_at IS NULL AND ' + (isMgr ? '1=1' : 'c.assigned_to = ' + req.user.id);
   const gap = parseInt(getSetting('followup_gap_days', '7'), 10) || 7;
 
   const totals = (await db.prepare(`
@@ -65,7 +66,7 @@ router.get('/summary', A.requireAuth, async (req, res) => {
     no_phone: (await db.prepare(`
       SELECT COUNT(*) n FROM cars c WHERE ${scope} AND (c.driver_phone IS NULL OR c.driver_phone='')`).get()).n,
     unassigned: isMgr
-      ? (await db.prepare('SELECT COUNT(*) n FROM cars WHERE assigned_to IS NULL').get()).n : 0,
+      ? (await db.prepare('SELECT COUNT(*) n FROM cars WHERE assigned_to IS NULL AND archived_at IS NULL').get()).n : 0,
   };
 
   const byResult = (await db.prepare(`
@@ -98,12 +99,12 @@ router.get('/performance', P.needs('reports.performance'), async (req, res) => {
 
   const rows = (await db.prepare(`
     SELECT u.id, u.emp_code, u.name, u.max_cars, u.active,
-      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id) AS cars_assigned,
-      (SELECT IFNULL(SUM(c.total_amount),0) FROM cars c WHERE c.assigned_to=u.id) AS due,
+      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id AND c.archived_at IS NULL) AS cars_assigned,
+      (SELECT IFNULL(SUM(c.total_amount),0) FROM cars c WHERE c.assigned_to=u.id AND c.archived_at IS NULL) AS due,
       (SELECT IFNULL(SUM(p.amount),0) FROM payments p JOIN cars c ON c.id=p.car_id
-         WHERE c.assigned_to=u.id) AS paid_all,
+         WHERE c.assigned_to=u.id AND c.archived_at IS NULL) AS paid_all,
       (SELECT IFNULL(SUM(p.amount),0) FROM payments p JOIN cars c ON c.id=p.car_id
-         WHERE c.assigned_to=u.id AND p.paid_at BETWEEN ? AND ?) AS collected,
+         WHERE c.assigned_to=u.id AND c.archived_at IS NULL AND p.paid_at BETWEEN ? AND ?) AS collected,
       (SELECT COUNT(*) FROM follow_ups f WHERE f.user_id=u.id AND f.created_at BETWEEN ? AND ?) AS follow_ups,
       (SELECT COUNT(DISTINCT f.car_id) FROM follow_ups f WHERE f.user_id=u.id AND f.created_at BETWEEN ? AND ?) AS cars_touched,
       (SELECT COUNT(*) FROM follow_ups f WHERE f.user_id=u.id AND f.reached=1 AND f.created_at BETWEEN ? AND ?) AS reached,
@@ -112,16 +113,16 @@ router.get('/performance', P.needs('reports.performance'), async (req, res) => {
          لا تدخل في "متابعات" لأن المتابعة تُقيَّد باسم صاحبة الملف — ولولا
          هذا العمود لبقي عمله كله خارج التقرير. */
       (SELECT COUNT(*) FROM referrals r WHERE r.helper_id=u.id AND r.replied_at BETWEEN ? AND ?) AS on_behalf,
-      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id AND c.status='مسدد') AS settled,
+      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id AND c.archived_at IS NULL AND c.status='مسدد') AS settled,
       (SELECT MAX(f.created_at) FROM follow_ups f WHERE f.user_id=u.id) AS last_activity,
-      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id
+      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id AND c.archived_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM follow_ups f WHERE f.car_id=c.id)) AS untouched
     FROM users u WHERE u.role='employee'
     ORDER BY collected DESC, follow_ups DESC`)
     .all(from, to, from, toEnd, from, toEnd, from, toEnd, from, toEnd, from, toEnd));
 
   const employees = rows.map((r) => {
-    const coverage = r.cars_assigned ? Math.round((r.cars_touched / r.cars_assigned) * 100) : 0;
+    const coverage = r.cars_assigned ? Math.min(Math.round((r.cars_touched / r.cars_assigned) * 100), 100) : 0;
     const reachRate = r.follow_ups ? Math.round((r.reached / r.follow_ups) * 100) : 0;
     const collectRate = r.due > 0 ? Math.round((r.paid_all / r.due) * 100) : 0;
     // نقاط البونص: 40% تحصيل + 30% تغطية السيارات + 20% عدد المتابعات + 10% نسبة الرد
@@ -194,7 +195,7 @@ router.get('/audit', P.needs('reports.audit'), async (req, res) => {
 router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
   // الحصر هنا لا في الواجهة: الموظف يصدّر سياراته وحدها مهما عبث بالرابط
   const mine = A.isManagerLevel(req.user);
-  const scope = mine ? '1=1' : 'c.assigned_to = ' + req.user.id;
+  const scope = 'c.archived_at IS NULL AND ' + (mine ? '1=1' : 'c.assigned_to = ' + req.user.id);
 
   const rows = (await db.prepare(`
     SELECT c.plate, c.car_type, c.driver_name, c.driver_phone, c.total_amount,

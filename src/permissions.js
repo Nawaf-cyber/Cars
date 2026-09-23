@@ -77,54 +77,112 @@ function canAssignRole(user, key) {
  * plan: القدرة تحتاج باقة تحتويها (تُباع كميزة إضافية).
  */
 const CAPABILITIES = [
-  { key: 'cars.view_all',      group: 'السيارات',  label: 'رؤية كل السيارات (لا سياراته فقط)' },
+  { key: 'cars.view_all',      group: 'السيارات',  label: 'رؤية كل السيارات (لا سياراته فقط)', min_rank: 1 },
   { key: 'cars.add',           group: 'السيارات',  label: 'إضافة سيارة' },
   { key: 'cars.edit',          group: 'السيارات',  label: 'تعديل بيانات السيارة والمبلغ' },
   { key: 'cars.edit_contact',  group: 'السيارات',  label: 'تصحيح بيانات تواصل السائق' },
   { key: 'cars.set_state',     group: 'السيارات',  label: 'تحديد حالة السيارة (مباعة · متوقفة · تحت الإجراء)' },
-  { key: 'cars.delete',        group: 'السيارات',  label: 'حذف سيارة' },
+  { key: 'cars.delete',        group: 'السيارات',  label: 'حذف سيارة', min_rank: 2 },
   { key: 'cars.assign',        group: 'السيارات',  label: 'إسناد السيارات وتوزيعها' },
   { key: 'cars.import',        group: 'السيارات',  label: 'استيراد وتوزيع ملف إكسل' },
 
   { key: 'followups.create',   group: 'المتابعة',  label: 'تسجيل متابعة' },
-  { key: 'followups.delete',   group: 'المتابعة',  label: 'حذف متابعة' },
+  { key: 'followups.delete',   group: 'المتابعة',  label: 'حذف متابعة', min_rank: 1 },
   { key: 'results.manage',     group: 'المتابعة',  label: 'تعديل قائمة نتائج المتابعة' },
   /* إحالة التواصل: مفتاحان منفصلان عمداً — من يُحيل غير من يتصل.
      مطفآن للجميع افتراضياً، فالشركة وحدها تعرف من يفعل ماذا. */
   { key: 'referrals.request',  group: 'المتابعة',  label: 'إحالة سيارة إلى زميل للتواصل' },
   { key: 'referrals.handle',   group: 'المتابعة',  label: 'تنفيذ طلبات التواصل والردّ عليها' },
   { key: 'payments.create',    group: 'المتابعة',  label: 'تسجيل دفعة' },
-  { key: 'payments.delete',    group: 'المتابعة',  label: 'حذف دفعة' },
+  { key: 'payments.delete',    group: 'المتابعة',  label: 'حذف دفعة', min_rank: 2 },
 
   { key: 'charges.view',       group: 'المتأخرات', label: 'رؤية المتأخرات والمطالبات' },
   { key: 'charges.settle',     group: 'المتأخرات', label: 'تحديد أن المطالبة سُدّدت أو أُرسلت' },
   { key: 'charges.create',     group: 'المتأخرات', label: 'إضافة مطالبة' },
   { key: 'charges.edit',       group: 'المتأخرات', label: 'تعديل مبلغ المطالبة أو وصفها' },
-  { key: 'charges.delete',     group: 'المتأخرات', label: 'حذف مطالبة' },
+  { key: 'charges.delete',     group: 'المتأخرات', label: 'حذف مطالبة', min_rank: 2 },
 
   { key: 'employees.view',     group: 'الموظفون',  label: 'رؤية قائمة الموظفين' },
-  { key: 'employees.add',      group: 'الموظفون',  label: 'إضافة موظف' },
+  { key: 'employees.add',      group: 'الموظفون',  label: 'إضافة موظف', min_rank: 1 },
   { key: 'employees.edit',     group: 'الموظفون',  label: 'تعديل موظف' },
-  { key: 'employees.delete',   group: 'الموظفون',  label: 'حذف موظف' },
+  { key: 'employees.delete',   group: 'الموظفون',  label: 'حذف موظف', min_rank: 2 },
 
   { key: 'reports.performance', group: 'التقارير', label: 'تقرير أداء الموظفين' },
   { key: 'reports.export',      group: 'التقارير', label: 'تصدير Excel' },
-  { key: 'reports.audit',       group: 'التقارير', label: 'سجل النشاط' },
+  { key: 'reports.audit',       group: 'التقارير', label: 'سجل النشاط', min_rank: 1 },
 
-  { key: 'salaries.view',      group: 'الرواتب',   label: 'رؤية الرواتب',            plan: true },
-  { key: 'salaries.manage',    group: 'الرواتب',   label: 'تعديل الرواتب والمسيّرات', plan: true },
+  { key: 'salaries.view',      group: 'الرواتب',   label: 'رؤية الرواتب',            plan: true, min_rank: 2 },
+  { key: 'salaries.manage',    group: 'الرواتب',   label: 'تعديل الرواتب والمسيّرات', plan: true, min_rank: 2 },
 
-  { key: 'settings.manage',    group: 'النظام',    label: 'تعديل إعدادات النظام' },
-  { key: 'features.manage',    group: 'النظام',    label: 'تشغيل وإطفاء صلاحيات الأدوار' },
-  { key: 'roles.manage',       group: 'النظام',    label: 'إنشاء المسمّيات الوظيفية وتعديلها' },
+  { key: 'settings.manage',    group: 'النظام',    label: 'تعديل إعدادات النظام', min_rank: 2 },
+  { key: 'features.manage',    group: 'النظام',    label: 'تشغيل وإطفاء صلاحيات الأدوار', min_rank: 2 },
+  { key: 'roles.manage',       group: 'النظام',    label: 'إنشاء المسمّيات الوظيفية وتعديلها', min_rank: 2 },
   // مطفأة للجميع افتراضياً: المفاتيح تخص من يملك النظام لا من يديره.
   // المالك يتجاوزها دائماً، ويستطيع منحها لمن يشاء بضغطة.
   { key: 'integrations.manage', group: 'النظام',   label: 'ربط البرامج الخارجية (زوهو · تم)' },
+
+  /* الأقسام المخفية — module يربط القدرة بقسم يكشفه المالك وحده.
+     ما دام القسم مطفأً فقدراته لا تعمل لأحد، ولا تظهر في شاشة المفاتيح،
+     ولا يُذكر اسمها في أي ردّ. تختلف عن plan: تلك تظهر رماديةً عرضاً
+     للبيع، وهذه لا يعرف أحدٌ بوجودها حتى تُكشف. */
+  { key: 'hr.view',   group: 'الموارد البشرية', module: 'hr', label: 'رؤية الوثائق والتنبيهات والحضور' },
+  { key: 'hr.manage', group: 'الموارد البشرية', module: 'hr', label: 'إضافة الوثائق وتجديدها وتسجيل الحضور' },
+  { key: 'it.view',   group: 'تقنية المعلومات', module: 'it', label: 'رؤية العُهد والاشتراكات وطلبات الدعم' },
+  { key: 'it.manage', group: 'تقنية المعلومات', module: 'it', label: 'إدارة العُهد والاشتراكات وطلبات الدعم' },
+  { key: 'it.self',   group: 'تقنية المعلومات', module: 'it', label: 'رفع طلب دعم فني ورؤية العُهد التي بيده' },
 ];
 
 const CAP_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 const CAP_LABEL = Object.fromEntries(CAPABILITIES.map((c) => [c.key, c.label]));
 const PLAN_CAPS = new Set(CAPABILITIES.filter((c) => c.plan).map((c) => c.key));
+
+/** الأقسام التي يكشفها المالك للشركة متى شاء. */
+const MODULES = { hr: 'الموارد البشرية', it: 'تقنية المعلومات' };
+const MODULE_OF = Object.fromEntries(CAPABILITIES.filter((c) => c.module).map((c) => [c.key, c.module]));
+
+/** هل كُشف هذا القسم للشركة؟ */
+function moduleEnabled(mod) {
+  const raw = String(cache.settings().modules_enabled || '');
+  return raw.split(',').map((s) => s.trim()).includes(mod);
+}
+
+/** قدرةٌ في قسم لم يُكشف بعد — لا تعمل، ولا تُرى، ولا تُذكر. */
+function hiddenCap(capability) {
+  const mod = MODULE_OF[capability];
+  return !!mod && !moduleEnabled(mod);
+}
+
+/* =============================================================================
+   الأرضية — أدنى مستوى يجوز أن يحمل القدرة
+   ---------------------------------------------------------------------------
+   الجداران (لا تمنح ما لا تملك، ولا تلمس دورك وما فوقه) يضعان سقفاً ولا
+   يضعان أرضية: كان مدير الشركة يستطيع أن ينزل بكل ما عنده إلى آخر موظف —
+   حذف السيارات بمتابعاتها، ورؤية الرواتب، وإنشاء المسمّيات. وجرّبناه:
+   ١٣ من ١٣ مُنحت لموظف عادي.
+
+   الأرضية تُفحص عند التشغيل لا عند المنح وحده: فالممنوح قبلها تحت مستواه
+   يتوقف عن العمل من تلقاء نفسه، بلا حاجة لتعديل صفٍّ في القاعدة.
+   ============================================================================= */
+const FLOOR_OF = Object.fromEntries(CAPABILITIES.filter((c) => c.min_rank).map((c) => [c.key, c.min_rank]));
+
+/** هل هذا الدور تحت أرضية القدرة؟ */
+function belowFloor(roleKey, capability) {
+  const floor = FLOOR_OF[capability];
+  return floor !== undefined && rankOf(roleKey) < floor;
+}
+
+/** اسم المستوى الذي عنده الأرضية — لرسالة تشرح الرفض بلغة الشركة. */
+function floorLabel(capability) {
+  const floor = FLOOR_OF[capability];
+  const r = Object.values(allRoles()).find((x) => x.builtin && !x.hidden && x.rank === floor);
+  return r ? r.label : '';
+}
+
+/* قدرات الأقسام المخفية تُزرع مشغّلةً للمدير ومشرف الموظفين من الآن.
+   لا تعمل ما دام القسم مطفأً — لكنها تجعل كشفه ضغطةً واحدة: يُفتح القسم
+   فيجده المدير جاهزاً. وإطفاؤه يُخفيه عن الجميع دفعةً واحدة، مهما وزّع
+   المدير منه على من تحته. */
+const MODULE_DEFAULTS_TOP = ['hr.view', 'hr.manage', 'it.view', 'it.manage', 'it.self'];
 
 /** الإعدادات الافتراضية عند أول تشغيل — يعدّلها مشرف الموظفين بعدها كما يشاء. */
 const DEFAULTS = {
@@ -139,6 +197,7 @@ const DEFAULTS = {
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
     'settings.manage', 'features.manage', 'roles.manage',
+    ...MODULE_DEFAULTS_TOP,
   ],
   manager: [
     'cars.view_all', 'cars.add', 'cars.edit', 'cars.edit_contact', 'cars.delete', 'cars.set_state',
@@ -153,6 +212,7 @@ const DEFAULTS = {
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
     'settings.manage', 'roles.manage',
+    ...MODULE_DEFAULTS_TOP,
   ],
   // مشرف القسم: يراقب بالكامل ولا يعدّل — نقطة البداية، ويضبطها مشرف الموظفين
   deputy: [
@@ -161,12 +221,14 @@ const DEFAULTS = {
     'charges.view',
     'employees.view',
     'reports.performance', 'reports.export',
+    'it.self',
   ],
   employee: [
     'cars.edit_contact', 'cars.set_state', 'followups.create', 'payments.create',
     'charges.view', 'charges.settle',
     // يصدّر سياراته وحده — الحصر في المسار لا في الواجهة
     'reports.export',
+    'it.self',
   ],
 };
 
@@ -198,15 +260,26 @@ function matrix(user) {
     if (user && user.role !== 'owner')
       for (const c of CAPABILITIES)
         if (!grantedByRole(user, c.key) && !PLAN_CAPS.has(c.key)) delete row[c.key];
+    // ما مُنح قبل الأرضية تحت مستواه لا يعمل — فيظهر كما هو فعلاً: مطفأ
+    for (const c of CAPABILITIES)
+      if (c.key in row && belowFloor(r.key, c.key)) row[c.key] = 0;
     out[r.key] = row;
   }
   return out;
 }
 
-/** هل الدور يملك القدرة بصرف النظر عن الباقة؟ */
+/**
+ * هل الدور يملك القدرة بصرف النظر عن الباقة؟
+ *
+ * قدرات القسم المخفي لا تُحسب مملوكةً لأحد: المدير مزروعةٌ له مسبقاً ليجدها
+ * جاهزةً يوم الكشف، لكنه قبل ذلك لا يراها في شاشة المفاتيح ولا يمنحها لغيره.
+ * هذه الدالة يستعملها العرض وجدار التصعيد معاً — فيكفي الإخفاء هنا.
+ */
 function grantedByRole(user, capability) {
   if (!user) return false;
   if (user.role === 'owner') return true;
+  if (hiddenCap(capability)) return false;
+  if (belowFloor(user.role, capability)) return false;   // تحت الأرضية: كأنها لم تُمنح
   return !!cache.permissions()[user.role]?.[capability];
 }
 
@@ -233,6 +306,12 @@ function can(user, capability) {
 
   // القدرات المرتبطة بالباقة: لا تُمنح إلا إذا اشترى العميل الميزة
   if (PLAN_CAPS.has(capability) && !planAllows(capability)) return false;
+
+  // قسم لم يكشفه المالك: لا تعمل قدرته لأحد، مهما حمل دورُه منها
+  if (hiddenCap(capability)) return false;
+
+  // تحت الأرضية: لا تعمل ولو كان صفّها مشغّلاً من قبل
+  if (belowFloor(user.role, capability)) return false;
 
   return !!cache.permissions()[user.role]?.[capability];
 }
@@ -292,14 +371,24 @@ async function setRolePermissions(role, changes, actor) {
                          ON CONFLICT(role, capability)
                          DO UPDATE SET enabled=excluded.enabled, updated_at=datetime('now','+3 hours')`);
   let n = 0;
-  const refused = [];
+  const refused = [], floored = [];
   for (const [cap, val] of Object.entries(changes || {})) {
     if (!CAP_KEYS.has(cap)) continue;
+    /* قدرة قسم مخفي تُعامَل كمفتاح لا وجود له — لا تُرفض باسمها، فالرفض
+       المعلَّل يذكر اسمها، وذكرُه وحده يكشف أن في النظام قسماً مخفياً. */
+    if (actorRole !== 'owner' && hiddenCap(cap)) continue;
+    /* الأرضية على الجميع، والمالك معهم: منحٌ تحت الأرضية لن يعمل أصلاً،
+       فقبولُه يُظهر مفتاحاً مشغّلاً لا يفعل شيئاً. من احتاج أن يحذف فمكانه
+       مسمّى في مستوى الأرضية أو فوقها. */
+    if (val && belowFloor(role, cap)) { floored.push(cap); continue; }
     if (val && !grantedByRole(actorUser, cap)) { refused.push(cap); continue; }
     await up.run(role, cap, val ? 1 : 0);
     n++;
   }
   await cache.reloadPermissions();
+  if (floored.length)
+    throw Object.assign(new Error('لا تُمنح لمن دون مستواها: ' +
+      floored.map((c) => `${CAP_LABEL[c] || c} (لا تنزل عن «${floorLabel(c)}»)`).join(' · ')), { partial: n });
   if (refused.length)
     throw Object.assign(new Error('لا يمكنك منح صلاحية لا تملكها: ' +
       refused.map((c) => CAP_LABEL[c] || c).join(' · ')), { partial: n });
@@ -318,4 +407,8 @@ module.exports = {
   // الأدوار بيانات: تُقرأ بهذه الدوال لا من ثوابت
   allRoles, roleOf, rankOf, labelOf, visibleRoles, assignableRoles, canAssignRole, clientRoleKeys,
   ensureDefaults, matrix, visibleCapabilities, grantedByRole, can, needs, setRolePermissions, capsOf, planAllows, planFeatures,
+  // الأقسام المخفية
+  MODULES, MODULE_OF, moduleEnabled, hiddenCap,
+  // الأرضية
+  FLOOR_OF, belowFloor, floorLabel,
 };

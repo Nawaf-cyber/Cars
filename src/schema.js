@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS cars (
   source         TEXT    NOT NULL DEFAULT 'يدوي', -- يدوي | استيراد
   batch_id       INTEGER REFERENCES import_batches(id) ON DELETE SET NULL,
   notes          TEXT,
+
+  -- الأرشفة بدل الحذف: سيارةٌ عليها متابعات أو دفعات لا تُمحى، بل تخرج من
+  -- القوائم والمجاميع وتبقى بياناتها كلها، وتُسترجع بضغطة.
+  archived_at    TEXT,
+  archived_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  archive_reason TEXT,
+
   created_at     TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
@@ -251,6 +258,168 @@ CREATE TABLE IF NOT EXISTS referrals (
   close_reason  TEXT,
   created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
+-- ============================================================================
+--  الأقسام: الموارد البشرية وتقنية المعلومات — مخفيّة حتى يكشفها المالك
+--  ----------------------------------------------------------------------------
+--  لا قيد CHECK على أي حالة هنا: القيد في المخطط لا يُعدَّل إلا بإعادة بناء
+--  الجدول، وإعادة بناء جدولٍ عليه بيانات هي ما أضاع حسابات الموظفين مرة.
+--  الحالات تُتحقَّق في الكود، وتضاف حالةٌ جديدة بسطرٍ لا بترقية.
+-- ============================================================================
+
+-- ---------- محرّك التواريخ ----------
+-- كيانٌ · نوعُ وثيقة · تاريخُ انتهاء · تنبيهٌ قبل كم يوماً. يخدم الموظفين
+-- (إقامة، رخصة) والسيارات (استمارة، فحص) والأجهزة (ضمان) والاشتراكات.
+--
+-- الأنواع بيانات لا ثوابت: كل شركة وما تتابعه، وتعدّلها بلا برمجة.
+CREATE TABLE IF NOT EXISTS doc_types (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_kind  TEXT    NOT NULL,              -- employee | car | asset | subscription
+  label        TEXT    NOT NULL,              -- إقامة · استمارة · ضمان …
+  alert_days   INTEGER NOT NULL DEFAULT 30,   -- ينبّه قبل الانتهاء بكم يوماً
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  active       INTEGER NOT NULL DEFAULT 1,
+  builtin      INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  UNIQUE (entity_kind, label)
+);
+
+-- الوثيقة. التجديد لا يمحو: يُعلَّم القديم "مُجدَّدة" ويُضاف صفٌّ جديد يشير إليه،
+-- فيبقى تاريخ كل إقامة وكل استمارة كما جرى.
+--
+-- entity_id بلا مفتاح أجنبي عمداً: يشير إلى جداول مختلفة بحسب النوع. ولهذا
+-- أيضاً لا يمسّه إعادة بناء جدول المستخدمين إطلاقاً.
+--
+-- المرفقات (صورة الإقامة وغيرها) ستكون جدولاً مستقلاً يشير إلى document.id —
+-- لا عموداً هنا. فتُضاف يوم تُطلب دون أن يُمسّ هذا الجدول.
+CREATE TABLE IF NOT EXISTS documents (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  type_id      INTEGER NOT NULL REFERENCES doc_types(id),
+  entity_kind  TEXT    NOT NULL,
+  entity_id    INTEGER NOT NULL,
+  number       TEXT,                          -- رقم الإقامة / الاستمارة / التسلسلي
+  issued_at    TEXT,
+  expires_at   TEXT    NOT NULL,
+  status       TEXT    NOT NULL DEFAULT 'سارية', -- سارية | مُجدَّدة | ملغاة
+  renewed_from INTEGER,                       -- الوثيقة التي جدّدتها هذه
+  note         TEXT,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_docs_entity ON documents(entity_kind, entity_id, status);
+CREATE INDEX IF NOT EXISTS idx_docs_expiry ON documents(status, expires_at);
+
+-- ---------- الحضور ----------
+-- صفٌّ لكل موظف في كل يوم. المصدر يدوي أو جهاز بصمة؛ وحين يختلفان يعلو
+-- اليدوي — فالإنسان يعرف السبب والجهاز لا يعرف إلا الباب — وتبقى قراءة
+-- الجهاز محفوظةً بجانبه في device_status، فيُرى الاختلاف ولا يُمحى.
+CREATE TABLE IF NOT EXISTS attendance (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day           TEXT    NOT NULL,             -- YYYY-MM-DD
+  status        TEXT    NOT NULL,             -- حاضر | غائب | متأخر | إجازة | مرضية | مهمة عمل
+  late_minutes  INTEGER,
+  source        TEXT    NOT NULL DEFAULT 'يدوي', -- يدوي | جهاز
+  device_status TEXT,                         -- ما قاله الجهاز إن خالف اليدوي
+  note          TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  UNIQUE (user_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_att_day ON attendance(day);
+
+-- ---------- العُهد ----------
+-- جهازٌ بيد موظف: لابتوب، جوال، شريحة، جهاز تتبع مركّب على سيارة.
+-- holder_id هو الحال الآن؛ والتاريخ كله في asset_moves لا يُمحى.
+CREATE TABLE IF NOT EXISTS assets (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT    NOT NULL,               -- لابتوب | جوال | شريحة | جهاز تتبع | طابعة | …
+  label       TEXT    NOT NULL,               -- "لابتوب Dell 5420"
+  serial      TEXT,                           -- الرقم التسلسلي / IMEI / رقم الشريحة
+  car_id      INTEGER REFERENCES cars(id) ON DELETE SET NULL,   -- جهاز تتبع على سيارة
+  status      TEXT    NOT NULL DEFAULT 'في المخزن', -- في المخزن | مُسلَّمة | صيانة | تالفة | مفقودة | مستبعدة
+  holder_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_assets_holder ON assets(holder_id);
+
+-- كل تسليم واستلام وصيانة — بمن، ومتى، وبأي حال. هذا ما يُحتكَم إليه يوم
+-- يقول الموظف "سلّمته" ويقول القسم "ما وصلنا".
+CREATE TABLE IF NOT EXISTS asset_moves (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id    INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  action      TEXT    NOT NULL,               -- إضافة | تسليم | استلام | صيانة | عودة من الصيانة | تالفة | مفقودة | استبعاد
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- الموظف المعني
+  condition   TEXT,                           -- الحال عند التسليم أو الاستلام
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_moves_asset ON asset_moves(asset_id);
+
+-- ---------- الاشتراكات ----------
+-- الدومين، الاستضافة، زوهو، الشرائح، الرخص. تاريخ التجديد في محرّك التواريخ.
+-- account يحمل اسم الحساب أو البريد فقط — كلمات المرور لا تُكتب هنا أبداً.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT    NOT NULL,
+  vendor         TEXT,
+  cost           REAL,
+  cycle          TEXT,                        -- شهري | سنوي | …
+  account        TEXT,
+  responsible_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  active         INTEGER NOT NULL DEFAULT 1,
+  note           TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
+-- ---------- طلبات الدعم الفني ----------
+-- "الطابعة وقفت"، "نسيت كلمة المرور". first_response_at يقيس سرعة الاستجابة.
+CREATE TABLE IF NOT EXISTS tickets (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  title             TEXT    NOT NULL,
+  body              TEXT,
+  category          TEXT    NOT NULL DEFAULT 'أخرى',
+  priority          TEXT    NOT NULL DEFAULT 'عادي',   -- عادي | عاجل
+  status            TEXT    NOT NULL DEFAULT 'جديد',   -- جديد | قيد العمل | بانتظار صاحب الطلب | مُغلق
+  asset_id          INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+  requester_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assignee_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  first_response_at TEXT,
+  closed_at         TEXT,
+  created_at        TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at        TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+CREATE INDEX IF NOT EXISTS idx_tickets_req    ON tickets(requester_id);
+
+CREATE TABLE IF NOT EXISTS ticket_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body        TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
+-- ---------- أرشيف الموظفين ----------
+-- موظفٌ له تاريخ (متابعات، مسيّرات، دفعات) لا يُحذف: حذفه يمحو رواتبه وبنوده
+-- في المسيّرات المدفوعة، ويُفرغ اسمه من كل متابعة سجّلها. فيُؤرشف: يُوقف
+-- حسابه ويختفي من القوائم، ويبقى كل ما له، ويُسترجع بضغطة.
+--
+-- جدولٌ مستقل لا أعمدة في users — جدول المستخدمين هو الذي ضاع مرة بإعادة
+-- البناء، فلا نزيد تعريفه عموداً ما دام يمكن الاستغناء.
+CREATE TABLE IF NOT EXISTS user_archive (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  reason      TEXT,
+  archived_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  archived_at TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_ref_helper ON referrals(helper_id, status);
 CREATE INDEX IF NOT EXISTS idx_ref_owner  ON referrals(owner_id, status);
 CREATE INDEX IF NOT EXISTS idx_ref_car    ON referrals(car_id, status);

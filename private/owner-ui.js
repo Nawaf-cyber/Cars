@@ -65,6 +65,13 @@
           <div id="own-features"></div>
         </div>
         <div class="panel">
+          <h3>الأقسام المخفية</h3>
+          <p class="muted">المطفأ لا يراه أحد في الشركة، ولا يعمل، ولا يُذكر اسمه في أي شاشة —
+            ولو حمل المدير قدراته. تشغيله يُظهره فوراً لمدير الشركة ومشرف الموظفين جاهزاً،
+            وإطفاؤه يُخفيه عن الجميع دفعةً واحدة. وأنت تراه دائماً لتجهّزه قبل كشفه.</p>
+          <div id="own-modules"></div>
+        </div>
+        <div class="panel">
           <h3>نشاط العميل — آخر 14 يوماً</h3>
           <p class="muted">دليل أن الشركة تستخدم النظام فعلاً قبل المطالبة بالتجديد.</p>
           <div id="own-activity"></div>
@@ -209,6 +216,35 @@
     };
   }
 
-  LOADERS.owner = loadOwner;
+  async function loadOwnerModules() {
+    const box = $('#own-modules');
+    if (!box) return;
+    let d;
+    try { d = await api('/owner/modules'); }
+    catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+
+    box.innerHTML = d.modules.map((m) => `
+      <label class="check" style="padding:.5rem 0;border-bottom:1px solid var(--line)">
+        <input type="checkbox" data-mod="${esc(m.key)}" ${m.enabled ? 'checked' : ''}>
+        <b>${esc(m.label)}</b>
+        <span class="badge ${m.enabled ? 'ok' : ''}" style="margin-right:.4rem">${m.enabled ? 'مكشوف للشركة' : 'مخفي'}</span>
+        <div class="muted" style="margin-top:.2rem">${m.caps.map((c) => esc(c.label)).join(' · ')}</div>
+      </label>`).join('') + `
+      <div class="row gap" style="margin-top:.8rem">
+        <button class="btn primary" id="mod-save">حفظ</button>
+      </div>`;
+
+    $('#mod-save', box).onclick = async () => {
+      const on = $$('#own-modules [data-mod]:checked').map((i) => i.dataset.mod);
+      try {
+        await api('/owner/modules', { method: 'PUT', body: { enabled: on } });
+        toast(on.length ? 'كُشف للشركة: ' + on.map((k) => d.modules.find((m) => m.key === k).label).join('، ')
+                        : 'الأقسام كلها مخفية عن الشركة', 'ok');
+        loadOwnerModules();
+      } catch (e) { toast(e.message, 'bad'); }
+    };
+  }
+
+  LOADERS.owner = () => { loadOwner(); loadOwnerModules(); };
 
 })();

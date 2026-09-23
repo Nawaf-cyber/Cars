@@ -61,6 +61,19 @@ async function referredToMe(user, carId) {
     .get(carId, user.id));
 }
 
+/**
+ * السيارة المؤرشفة تُقرأ ولا تُكتب: متابعاتها ودفعاتها محفوظة كما كانت
+ * يوم أُرشفت، ولا يُضاف إليها شيء حتى تُسترجع — وإلا تغيّر ما أُرشف.
+ * يُرجع true إن رفض الطلب.
+ */
+function archivedGuard(car, res) {
+  if (car && car.archived_at) {
+    res.status(409).json({ error: 'السيارة مؤرشفة — استرجعها أولاً لتعدّل عليها', archived: true });
+    return true;
+  }
+  return false;
+}
+
 // يقرأ اللوحة من الطلب: إمّا حروف وأرقام منفصلة (النموذج الجديد) أو نصاً كاملاً.
 // الإدخال اليدوي صارم: لا تُقبل لوحة ناقصة الحروف أو الأرقام.
 function readPlate(b) {
@@ -91,6 +104,11 @@ router.get('/', A.requireAuth, async (req, res) => {
   const where = [];
   const params = [];
   where.push(scopeClause(req.user, params));
+
+  /* المؤرشفة خارج القائمة ومجاميعها — وتُعرض وحدها حين تُطلب، لمن يملك
+     الحذف (فهو من يؤرشف ويسترجع). والقائمة والمجموع يقرآن الشرط نفسه. */
+  if (req.query.archived === '1' && P.can(req.user, 'cars.delete')) where.push('c.archived_at IS NOT NULL');
+  else where.push('c.archived_at IS NULL');
 
   const q = String(req.query.q || '').trim();
   if (q) {
@@ -180,8 +198,13 @@ router.get('/:id', A.requireAuth, async (req, res) => {
     ORDER BY CASE ch.status WHEN 'متأخر' THEN 0 WHEN 'مرسل' THEN 1 ELSE 2 END,
              ch.issued_at DESC, ch.id DESC`).all(id)) : [];
 
-  // read_only يقول للواجهة: اعرض ولا تفتح نموذجاً — والخادم يمنع أصلاً
-  res.json({ car, follow_ups: followUps, payments, charges, read_only: referred || undefined });
+  if (car.archived_at && car.archived_by)
+    car.archived_by_name = (await db.prepare('SELECT name FROM users WHERE id=?').get(car.archived_by))?.name || null;
+
+  // read_only يقول للواجهة: اعرض ولا تفتح نموذجاً — والخادم يمنع أصلاً.
+  // والمؤرشفة للقراءة كذلك حتى تُسترجع.
+  res.json({ car, follow_ups: followUps, payments, charges,
+             read_only: (referred || !!car.archived_at) || undefined });
 });
 
 // ================= إضافة سيارة (المدير فقط) =================
@@ -193,7 +216,9 @@ router.post('/', P.needs('cars.add'), async (req, res) => {
   const p = readPlate(b);
   if (!p.valid) return res.status(400).json({ error: p.error });
   const { plate, key } = p;
-  const dup = (await db.prepare('SELECT id, plate FROM cars WHERE plate_key = ?').get(key));
+  const dup = (await db.prepare('SELECT id, plate, archived_at FROM cars WHERE plate_key = ?').get(key));
+  if (dup && dup.archived_at)
+    return res.status(409).json({ error: `اللوحة "${dup.plate}" مؤرشفة — استرجعها من «المؤرشفة» بدل إضافتها من جديد`, car_id: dup.id, archived: true });
   if (dup) return res.status(409).json({ error: `اللوحة مسجّلة من قبل باسم "${dup.plate}"`, car_id: dup.id });
 
   const carType = U.CAR_TYPES.includes(b.car_type) ? b.car_type : 'نقل عام';
@@ -245,6 +270,7 @@ router.put('/:id', A.requireAuth, async (req, res) => {
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
   const isMgr = P.can(req.user, 'cars.edit');
@@ -315,12 +341,57 @@ router.put('/:id', A.requireAuth, async (req, res) => {
   res.json({ ok: true, phone_warning: phoneInfo.phone && !phoneInfo.valid ? phoneInfo.reason : null });
 });
 
+/**
+ * حذف السيارة — أو أرشفتها إن كان لها تاريخ.
+ *
+ * الحذف يجرّ معه كل متابعاتها ودفعاتها ومطالباتها بلا رجعة، وسجل النشاط
+ * يقول إنها حُذفت لا ماذا كان فيها. فالسيارة التي بُني عليها شيء تُؤرشف:
+ * تخرج من القوائم والمجاميع، وتبقى بياناتها كلها، وتُسترجع بضغطة.
+ * والحذف النهائي باقٍ لخطأ الإدخال الذي لم يُبنَ عليه شيء.
+ */
 router.delete('/:id', P.needs('cars.delete'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  (await db.prepare('DELETE FROM cars WHERE id=?').run(id));
-  A.audit(req.user.id, 'حذف سيارة', 'cars', id, { plate: car.plate });
+  if (car.archived_at) return res.status(400).json({ error: 'السيارة مؤرشفة أصلاً' });
+
+  const n = async (q) => Number((await db.prepare(q).get(id)).n);
+  const history = {
+    متابعات: await n('SELECT COUNT(*) n FROM follow_ups WHERE car_id=?'),
+    دفعات: await n('SELECT COUNT(*) n FROM payments WHERE car_id=?'),
+    مطالبات: await n('SELECT COUNT(*) n FROM charges WHERE car_id=?'),
+  };
+  const hasHistory = Object.values(history).some((x) => x > 0);
+
+  if (!hasHistory) {
+    (await db.prepare('DELETE FROM cars WHERE id=?').run(id));
+    A.audit(req.user.id, 'حذف سيارة', 'cars', id, { plate: car.plate, السبب: 'بلا تاريخ' });
+    return res.json({ ok: true, deleted: true });
+  }
+
+  const now = U.now();
+  const reason = String(req.body?.reason || '').trim().slice(0, 200) || null;
+  await db.prepare('UPDATE cars SET archived_at=?, archived_by=?, archive_reason=?, updated_at=? WHERE id=?')
+    .run(now, req.user.id, reason, now, id);
+
+  // طلبات التواصل الجارية عليها تُغلق — لا يتصل زميلٌ على سيارة خرجت من العمل
+  await db.prepare(`UPDATE referrals SET status='ملغى', closed_at=?, closed_by=?, close_reason='أُرشفت السيارة'
+    WHERE car_id=? AND status IN ('مُرسَل','مفتوح','وصلت النتيجة')`).run(now, req.user.id, id);
+
+  A.audit(req.user.id, 'أرشفة سيارة', 'cars', id, { plate: car.plate, ...history, السبب: reason || '—' });
+  res.json({ ok: true, archived: true, history });
+});
+
+// استرجاع سيارة مؤرشفة — تعود كما أُرشفت، بكل ما لها
+router.post('/:id/restore', P.needs('cars.delete'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (!car.archived_at) return res.status(400).json({ error: 'السيارة ليست مؤرشفة' });
+
+  await db.prepare('UPDATE cars SET archived_at=NULL, archived_by=NULL, archive_reason=NULL, updated_at=? WHERE id=?')
+    .run(U.now(), id);
+  A.audit(req.user.id, 'استرجاع سيارة', 'cars', id, { plate: car.plate });
   res.json({ ok: true });
 });
 
@@ -332,10 +403,11 @@ router.post('/assign', P.needs('cars.assign'), async (req, res) => {
   if (to && !(await db.prepare('SELECT 1 FROM users WHERE id=? AND active=1').get(to)))
     return res.status(400).json({ error: 'الموظف المحدد غير موجود أو موقوف' });
 
-  const stmt = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','+3 hours') WHERE id=?");
-  for (const id of ids) await stmt.run(to, id);
-  A.audit(req.user.id, 'إسناد سيارات', 'cars', null, { count: ids.length, to });
-  res.json({ ok: true, updated: ids.length });
+  const stmt = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','+3 hours') WHERE id=? AND archived_at IS NULL");
+  let updated = 0;
+  for (const id of ids) updated += Number((await stmt.run(to, id)).changes || 0);
+  A.audit(req.user.id, 'إسناد سيارات', 'cars', null, { count: updated, to });
+  res.json({ ok: true, updated });
 });
 
 // توزيع تلقائي — المدير هو من يحدد السقف (افتراضي من الإعدادات أو سقف كل موظف)
@@ -356,13 +428,13 @@ router.post('/distribute', P.needs('cars.assign'), async (req, res) => {
   if (includeAssigned) (await db.prepare('UPDATE cars SET assigned_to=NULL').run());
 
   const pool = (await db.prepare(`
-    SELECT id FROM cars WHERE assigned_to IS NULL AND status NOT IN ('مسدد','منتهي بالتمليك') ORDER BY id`).all());
+    SELECT id FROM cars WHERE assigned_to IS NULL AND archived_at IS NULL AND status NOT IN ('مسدد','منتهي بالتمليك') ORDER BY id`).all());
   if (!pool.length) return res.json({ ok: true, distributed: 0, message: 'لا توجد سيارات غير مسندة للتوزيع' });
 
   // سعة كل موظف = السقف الخاص به (أو الافتراضي) ناقص ما لديه الآن
   const slots = [];
   for (const e of emps) {
-    const cur = await db.prepare('SELECT COUNT(*) n FROM cars WHERE assigned_to=?').get(e.id);
+    const cur = await db.prepare('SELECT COUNT(*) n FROM cars WHERE assigned_to=? AND archived_at IS NULL').get(e.id);
     const cap = perEmployee != null ? perEmployee : (e.max_cars != null ? e.max_cars : defaultCap);
     slots.push({ id: e.id, name: e.name, free: Math.max(cap - cur.n, 0), got: 0 });
   }
@@ -392,6 +464,7 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
   // النتائج يملكها المدير ويعدّلها — لا قائمة ثابتة في الكود
@@ -453,6 +526,11 @@ router.delete('/follow-ups/:fid', P.needs('followups.delete'), async (req, res) 
   const fid = parseInt(req.params.fid, 10);
   const f = (await db.prepare('SELECT * FROM follow_ups WHERE id=?').get(fid));
   if (!f) return res.status(404).json({ error: 'المتابعة غير موجودة' });
+  /* كان الحذف بالرقم وحده: من ملك المفتاح حذف متابعة أي سيارة، ولو لم
+     يرَها. السيارة تُفحص كما في كل كتابة، والمؤرشفة لا يُحذف منها شيء. */
+  const car = await db.prepare('SELECT id, assigned_to, archived_at FROM cars WHERE id=?').get(f.car_id);
+  if (car && !canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
   (await db.prepare('DELETE FROM follow_ups WHERE id=?').run(fid));
   A.audit(req.user.id, 'حذف متابعة', 'cars', f.car_id, { result: f.result_code });
   res.json({ ok: true });
@@ -464,6 +542,7 @@ router.post('/:id/payments', P.needs('payments.create'), async (req, res) => {
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
   const amount = U.money(b.amount);
@@ -507,6 +586,9 @@ router.delete('/payments/:pid', P.needs('payments.delete'), async (req, res) => 
   const pid = parseInt(req.params.pid, 10);
   const p = (await db.prepare('SELECT * FROM payments WHERE id=?').get(pid));
   if (!p) return res.status(404).json({ error: 'الدفعة غير موجودة' });
+  const car = await db.prepare('SELECT id, assigned_to, archived_at FROM cars WHERE id=?').get(p.car_id);
+  if (car && !canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
   (await db.prepare('DELETE FROM payments WHERE id=?').run(pid));
   await refreshStatus(p.car_id);
   A.audit(req.user.id, 'حذف دفعة', 'cars', p.car_id, { amount: p.amount });
@@ -526,7 +608,7 @@ router.delete('/payments/:pid', P.needs('payments.delete'), async (req, res) => 
 async function chargeOf(req, res) {
   const cid = parseInt(req.params.cid, 10);
   const row = (await db.prepare(`
-    SELECT ch.*, c.plate, c.assigned_to
+    SELECT ch.*, c.plate, c.assigned_to, c.archived_at
     FROM charges ch JOIN cars c ON c.id = ch.car_id
     WHERE ch.id = ?`).get(cid));
   if (!row) { res.status(404).json({ error: 'المطالبة غير موجودة' }); return null; }
@@ -534,15 +616,17 @@ async function chargeOf(req, res) {
     res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
     return null;
   }
+  if (archivedGuard(row, res)) return null;
   return row;
 }
 
 // ---------- إضافة مطالبة ----------
 router.post('/:id/charges', P.needs('charges.create'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const car = (await db.prepare('SELECT id, plate, assigned_to FROM cars WHERE id=?').get(id));
+  const car = (await db.prepare('SELECT id, plate, assigned_to, archived_at FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
   const description = String(b.description || '').trim();
@@ -663,7 +747,7 @@ async function zohoReady() {
 // ---------- البحث (لا يكتب شيئاً) ----------
 router.get('/:id/charges/search', P.needs('charges.view'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const car = (await db.prepare('SELECT id, plate, plate_digits, assigned_to FROM cars WHERE id=?').get(id));
+  const car = (await db.prepare('SELECT id, plate, plate_digits, assigned_to, archived_at FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
   if (!car.plate_digits) return res.status(400).json({ error: 'اللوحة بلا أرقام — لا يمكن البحث' });
@@ -692,9 +776,10 @@ router.get('/:id/charges/search', P.needs('charges.view'), async (req, res) => {
 // ---------- الاستيراد ----------
 router.post('/:id/charges/import', P.needs('charges.create'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const car = (await db.prepare('SELECT id, plate, plate_digits, assigned_to FROM cars WHERE id=?').get(id));
+  const car = (await db.prepare('SELECT id, plate, plate_digits, assigned_to, archived_at FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
 
   const wanted = Array.isArray(req.body?.ids) ? new Set(req.body.ids.map(String)) : null;
 
@@ -747,9 +832,10 @@ router.post('/:id/charges/import', P.needs('charges.create'), async (req, res) =
    يحددها الموظف من قائمة بجانب زر "فتح" بلا فتح السيارة أصلاً. */
 router.post('/:id/state', P.needs('cars.set_state'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const car = (await db.prepare('SELECT id, plate, car_state, assigned_to FROM cars WHERE id=?').get(id));
+  const car = (await db.prepare('SELECT id, plate, car_state, assigned_to, archived_at FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
   if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  if (archivedGuard(car, res)) return;
 
   const raw = String((req.body || {}).car_state ?? '').trim();
   if (raw && !U.CAR_STATES.includes(raw))

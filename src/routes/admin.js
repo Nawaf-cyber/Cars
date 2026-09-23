@@ -7,9 +7,11 @@ const P = require('../permissions');
 const router = express.Router();
 
 /* ---------- شاشة المفاتيح: تشغيل وإطفاء صلاحيات الأدوار ---------- */
-/* من يملك features.manage يضبط المفاتيح، ومن يملك roles.manage يضبط
-   مفاتيح الأدوار التي أنشأها — وإلا أنشأ دوراً ولا يستطيع تشغيل شيء فيه.
-   الأمان محفوظ بالجدارين داخل setRolePermissions لا بحجب الشاشة. */
+/* يدخلها من يملك features.manage أو roles.manage — والثاني يضبط مفاتيح كل
+   دورٍ تحته، لا ما أنشأه وحده (كان التعليق هنا يقول غير ذلك). فإطفاء الأول
+   عن أحدٍ يملك الثاني لا يمنعه. الأمان في ثلاثة داخل setRolePermissions: لا
+   يمنح ما لا يملك، ولا يلمس دوره وما فوقه، ولا ينزل بقدرة تحت أرضيتها —
+   والقدرتان كلتاهما أرضيتهما مدير الشركة، فلا تصلان موظفاً أبداً. */
 const canTunePermissions = (req, res, next) =>
   (P.can(req.user, 'features.manage') || P.can(req.user, 'roles.manage'))
     ? next()
@@ -39,6 +41,9 @@ router.get('/permissions', canTunePermissions, async (req, res) => {
     matrix: P.matrix(req.user),
     plan_features: P.planFeatures(),
     locked: [...P.PLAN_CAPS].filter((c) => !P.planAllows(c)),
+    // الأرضية: لكل قدرة أدنى مستوى يحملها، واسمه — تُعرض مطفأةً لمن دونه
+    floors: Object.fromEntries(Object.entries(P.FLOOR_OF).map(([k, rank]) =>
+      [k, { rank, label: P.floorLabel(k) }])),
   });
 });
 
@@ -147,11 +152,11 @@ router.post('/payroll', P.needs('salaries.manage'), async (req, res) => {
     SELECT u.id, u.name, u.role,
       IFNULL(s.base_salary,0) base, IFNULL(s.housing,0) housing, IFNULL(s.transport,0) transport,
       (SELECT IFNULL(SUM(p.amount),0) FROM payments p JOIN cars c ON c.id=p.car_id
-         WHERE c.assigned_to=u.id AND p.paid_at BETWEEN ? AND ?) collected,
+         WHERE c.assigned_to=u.id AND c.archived_at IS NULL AND p.paid_at BETWEEN ? AND ?) collected,
       (SELECT COUNT(*) FROM follow_ups f WHERE f.user_id=u.id AND f.created_at BETWEEN ? AND ?) fups,
       (SELECT COUNT(DISTINCT f.car_id) FROM follow_ups f WHERE f.user_id=u.id AND f.created_at BETWEEN ? AND ?) touched,
       (SELECT COUNT(*) FROM follow_ups f WHERE f.user_id=u.id AND f.reached=1 AND f.created_at BETWEEN ? AND ?) reached,
-      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id) assigned
+      (SELECT COUNT(*) FROM cars c WHERE c.assigned_to=u.id AND c.archived_at IS NULL) assigned
     FROM users u
     LEFT JOIN salaries s ON s.id = (
       SELECT id FROM salaries WHERE user_id=u.id AND effective_from <= ?
@@ -165,8 +170,17 @@ router.post('/payroll', P.needs('salaries.manage'), async (req, res) => {
   const runId = Number(info.lastInsertRowid);
 
   const ins = db.prepare(`INSERT INTO payroll_items
-    (run_id, user_id, base_salary, housing, transport, bonus, deductions, net, score, collected)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`);
+    (run_id, user_id, base_salary, housing, transport, bonus, deductions, net, score, collected, note)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+
+  /* الغياب ينزل خصماً مقترحاً — حين يكون قسم الموارد البشرية مكشوفاً وحده.
+     ما دام مخفياً فالمسيّر كما كان تماماً: القسم المخفي لا يغيّر ما تراه
+     الشركة، ولو سجّل فيه المالك حضوراً ليجرّبه. */
+  const absences = {};
+  if (P.moduleEnabled('hr')) {
+    for (const r of await require('./hr').monthSummary(month))
+      if (r.unpaid_days) absences[r.user_id] = r;
+  }
 
   for (const s of staff) {
     const coverage = s.assigned ? Math.min(s.touched / s.assigned, 1) : 0;
@@ -178,8 +192,12 @@ router.post('/payroll', P.needs('salaries.manage'), async (req, res) => {
       reachRate * 10
     );
     const bonus = U.money((bonusPool * score) / 100);
-    const net = U.money(s.base + s.housing + s.transport + bonus);
-    await ins.run(runId, s.id, s.base, s.housing, s.transport, bonus, 0, net, score, U.money(s.collected));
+    const abs = absences[s.id];
+    // اقتراحٌ يُعدَّل في البند قبل الاعتماد — لا يتجاوز الراتب أبداً
+    const deduction = abs ? Math.min(abs.suggested_deduction, s.base + s.housing + s.transport + bonus) : 0;
+    const net = U.money(s.base + s.housing + s.transport + bonus - deduction);
+    await ins.run(runId, s.id, s.base, s.housing, s.transport, bonus, U.money(deduction), net, score,
+      U.money(s.collected), abs ? `غياب ${abs.unpaid_days} يوم (من سجل الحضور) — الأساسي ÷ ٣٠ لكل يوم` : null);
   }
 
   A.audit(req.user.id, 'إنشاء مسيّر رواتب', 'payroll_runs', runId, { month, staff: staff.length });

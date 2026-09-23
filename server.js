@@ -281,6 +281,17 @@ app.get('/api/ui/extra.js', A.requireOwner, (req, res) => {
   res.sendFile(path.join(__dirname, 'private', 'owner-ui.js'));
 });
 
+/* واجهة الأقسام — لا في public ولا في app.js. تُقدَّم لمن يحق له وحده،
+   ولغيره يُجاب كأن الملف لا وجود له: فلا يعرف أحدٌ من مصدر الصفحة ولا من
+   الشبكة أن في النظام قسماً لم يُكشف له. */
+app.get('/api/ui/depts.js', (req, res) => {
+  if (!req.user || !require('./src/modules').wantsDeptsUI(req.user))
+    return res.status(404).json({ error: 'المسار غير موجود' });
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'private', 'depts-ui.js'));
+});
+
 // ---------- حالة الاشتراك (متاحة دائماً حتى للعميل الموقوف) ----------
 app.get('/api/license/status', A.requireAuth, (req, res) => {
   const st = LIC.evaluate();
@@ -302,6 +313,10 @@ app.use('/api/integrations', require('./src/routes/integrations'));
 app.use('/api/roles', require('./src/routes/roles'));
 app.use('/api/results', require('./src/routes/results'));
 app.use('/api/referrals', require('./src/routes/referrals'));
+// الأقسام المخفية — تُجيب "المسار غير موجود" ما دام المالك لم يكشفها
+app.use('/api/docs', require('./src/routes/docs'));
+app.use('/api/hr', require('./src/routes/hr'));
+app.use('/api/it', require('./src/routes/it'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/users', require('./src/routes/users'));

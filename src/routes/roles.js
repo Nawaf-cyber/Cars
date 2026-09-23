@@ -92,9 +92,12 @@ router.post('/', P.needs('roles.manage'), async (req, res) => {
 
   const ins = db.prepare(
     'INSERT INTO role_permissions (role, capability, enabled) VALUES (?,?,?) ON CONFLICT(role, capability) DO NOTHING');
+  /* ولا يُورَث ما تحت الأرضية: "نسخة المدير" بمستوى مشرف القسم كانت تأخذ
+     الحذف وإنشاء المسمّيات، فيستنسخ المديرُ نفسه طبقةً تحته، وتلك تحتها. */
   for (const c of P.CAPABILITIES) {
     const wanted = source[c.key] ? 1 : 0;
-    await ins.run(key, c.key, wanted && P.can(req.user, c.key) ? 1 : 0);
+    const allowed = P.can(req.user, c.key) && !(c.min_rank !== undefined && rank < c.min_rank);
+    await ins.run(key, c.key, wanted && allowed ? 1 : 0);
   }
 
   await cache.reloadRoles();

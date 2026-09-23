@@ -11,7 +11,14 @@ const DEFAULTS = {
   followup_gap_days: '7',          // بعد كم يوم تُعتبر السيارة متأخرة عن المتابعة
   backup_dir: '',                  // مجلد نسخ خارج الجهاز (OneDrive / قرص خارجي)
   plan_features: '',               // المزايا المشمولة في الباقة — يحددها المالك
+  modules_enabled: '',             // الأقسام المكشوفة للشركة (hr,it) — يحددها المالك
 };
+
+/* إعدادات لا تغادر الخادم إلا إلى المالك.
+   /api/settings يُقرأ بأي جلسة، فكان يُرجع plan_features لكل موظف — ومعها
+   أسماء ما يُباع وما لم يُشترَ بعد. ولو أُضيفت الأقسام المخفية هناك لقرأ أي
+   موظف من أدوات المتصفح أن في النظام أقساماً لم تُكشف له. */
+const OWNER_ONLY = new Set(['plan_features', 'modules_enabled']);
 
 /** قراءة فورية من الذاكرة — لا تلمس القاعدة. */
 function getSetting(key, fallback) {
@@ -27,9 +34,12 @@ async function setSetting(key, value) {
   await cache.reloadSettings();
 }
 
+/** ما يُرسل للواجهة — بلا إعدادات المالك. */
 function allSettings() {
-  return { ...DEFAULTS, ...Object.fromEntries(
+  const merged = { ...DEFAULTS, ...Object.fromEntries(
     Object.entries(cache.settings()).filter(([, v]) => v !== null && v !== '')) };
+  for (const k of OWNER_ONLY) delete merged[k];
+  return merged;
 }
 
-module.exports = { getSetting, setSetting, allSettings, DEFAULTS };
+module.exports = { getSetting, setSetting, allSettings, DEFAULTS, OWNER_ONLY };

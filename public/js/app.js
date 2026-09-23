@@ -229,8 +229,16 @@ async function boot() {
   // بعض المستخدمين لهم واجهة إضافية يقرّرها الخادم ويقدّمها من مسار محمي
   if (S.user.extra_ui) await loadExtraUI();
   else purgeExtraUI();   // مستخدم بلا هذه الواجهة: انزع ما حقنه من سبقه
+  purgeModules();        // وما حقنته وحداتُ من سبقه — ثم نحمّل وحداته هو
+  for (const m of S.user.ui_modules || []) await loadModule(m);
   fillSelect($('#f-status'), S.consts.car_statuses, 'كل الحالات');
   fillSelect($('#f-type'), S.consts.car_types, 'كل الأنواع');
+  /* «المؤرشفة» لمن يؤرشف ويسترجع وحده. تُضاف وتُنزع هنا لا في الصفحة —
+     الخيار المخفي بالتنسيق يبقى ظاهراً في بعض المتصفحات. */
+  const arcOpt = $('#f-quick option[value="archived"]');
+  if (cap('cars.delete') && !arcOpt)
+    $('#f-quick').insertAdjacentHTML('beforeend', '<option value="archived">المؤرشفة</option>');
+  else if (!cap('cars.delete') && arcOpt) arcOpt.remove();
   if (isMgr()) await loadEmployees();
   await loadHelpers();     // زملاء التواصل المعتمدون لي — للإحالة الجماعية
   $('#dash-from').value = $('#perf-from').value = monthStart();
@@ -249,6 +257,31 @@ async function boot() {
 function purgeExtraUI() {
   document.querySelectorAll('[data-owner-ui]').forEach((el) => el.remove());
   extraLoaded = false;
+  purgeModules();
+}
+
+/* ---------------- وحدات يقرّرها الخادم ----------------
+   أسماؤها تأتي من الخادم مع بيانات المستخدم، وملفّها لا يُقدَّم إلا لمن
+   يحق له. فلا يظهر في هذا الملف ما هي ولا ما تفعل — ومن لم تُكشف له لا
+   يرى في مصدر الصفحة أثراً لوجودها. وما تحقنه يُنزع عند الخروج كلوحة المالك. */
+const loadedModules = new Set();
+
+function purgeModules() {
+  document.querySelectorAll('[data-ui-module]').forEach((el) => el.remove());
+  loadedModules.clear();
+}
+
+function loadModule(name) {
+  if (loadedModules.has(name) || !/^[a-z]+$/.test(name)) return Promise.resolve();
+  loadedModules.add(name);
+  return new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = `/api/ui/${name}.js`;
+    s.dataset.uiModule = name;
+    s.onload = resolve;
+    s.onerror = () => { loadedModules.delete(name); resolve(); };
+    document.body.appendChild(s);
+  });
 }
 
 // تحميل الواجهة الإضافية مرة واحدة (وسم <script> ليبقى متوافقاً مع سياسة أمان المحتوى)
@@ -432,7 +465,7 @@ async function loadCars() {
         ${showArrears ? `<td class="num">${c.arrears_total > 0
             ? `<b style="color:var(--bad)">${num(c.arrears_total)}</b><br><small class="muted">${num(c.arrears_count)} مطالبة</small>`
             : '<span class="muted">—</span>'}</td>` : ''}
-        <td>${statusBadge(c.status)}</td>
+        <td>${c.archived_at ? '<span class="badge">مؤرشفة</span>' : statusBadge(c.status)}</td>
         <td class="num">${c.contact_count > 0
             ? `<span class="badge info">${num(c.contact_count)}</span>`
             : '<span class="badge bad">0</span>'}</td>
@@ -849,7 +882,12 @@ function renderCar(b, d) {
   const late = c.promise_date && c.promise_date < todayISO() && c.status !== 'مسدد';
 
   b.innerHTML = `
-    ${ro ? `<div class="alert info" style="margin-bottom:.8rem">
+    ${c.archived_at ? `<div class="alert warn" style="margin-bottom:.8rem">
+      <b>سيارة مؤرشفة</b> — أُرشفت ${dt(c.archived_at)}${c.archived_by_name ? ` بواسطة ${esc(c.archived_by_name)}` : ''}${
+        c.archive_reason ? ` · ${esc(c.archive_reason)}` : ''}.
+      خارج القوائم والمجاميع، وكل متابعاتها ودفعاتها محفوظة كما كانت. لا تُعدَّل حتى تُسترجع.
+      ${cap('cars.delete') ? '<div style="margin-top:.5rem"><button class="btn sm primary" id="car-restore">استرجاع السيارة</button></div>' : ''}
+    </div>` : ro ? `<div class="alert info" style="margin-bottom:.8rem">
       <b>سيارة أُحيلت إليك للتواصل.</b> اقرأ ما تحتاجه قبل الاتصال، ثم أرسل النتيجة
       من قائمة «بالنيابة». لا تُعدَّل بياناتها من هنا — صاحبة الملف هي من تعدّل.
     </div>` : ''}
@@ -883,6 +921,12 @@ function renderCar(b, d) {
     <div id="ct-pay" class="hidden"></div>
     <div id="ct-charge" class="hidden"></div>
     ${ro ? '' : '<div id="ct-edit" class="hidden"></div>'}`;
+
+  const restore = $('#car-restore', b);
+  if (restore) restore.onclick = () => confirmBox(`استرجاع ${c.plate}؟ تعود إلى القوائم بكل متابعاتها ودفعاتها.`, async () => {
+    try { await api(`/cars/${c.id}/restore`, { method: 'POST' }); toast('استُرجعت السيارة', 'ok'); openCar(c.id); loadCars(); }
+    catch (e) { toast(e.message, 'bad'); }
+  }, false);
 
   $('#car-tabs', b).onclick = (e) => {
     const t = e.target.closest('button'); if (!t) return;
@@ -992,12 +1036,23 @@ function renderCar(b, d) {
   const edit = $('#ct-edit', b);
   if (!edit) return;                       // سيارة مُحالة: لا تبويب تعديل أصلاً
   edit.innerHTML = carForm(c, cap('cars.edit')) + (cap('cars.delete')
-    ? `<div class="modal-actions"><button class="btn danger" id="car-del">حذف السيارة نهائياً</button></div>` : '');
+    ? `<div class="modal-actions"><button class="btn danger" id="car-del">${
+        d.follow_ups.length || d.payments.length || (d.charges || []).length
+          ? 'أرشفة السيارة' : 'حذف السيارة نهائياً'}</button></div>` : '');
   bindCarForm($('#car-form', b), c.id, () => { openCar(c.id); loadCars(); });
   const del = $('#car-del', b);
-  if (del) del.onclick = () => confirmBox(`حذف السيارة ${c.plate} وكل متابعاتها ودفعاتها نهائياً؟`, async () => {
-    try { await api('/cars/' + c.id, { method: 'DELETE' }); closeModal(); toast('تم الحذف', 'ok'); loadCars(); }
-    catch (e) { toast(e.message, 'bad'); }
+  /* الخادم هو من يقرّر: سيارةٌ عليها متابعات أو دفعات تُؤرشف ولا تُحذف.
+     فالسؤال يقول ذلك قبل الضغط، والجواب يقول ما حدث فعلاً بعده. */
+  const hasHistory = d.follow_ups.length || d.payments.length || (d.charges || []).length;
+  if (del) del.onclick = () => confirmBox(hasHistory
+    ? `السيارة ${c.plate} عليها متابعات أو دفعات — ستُؤرشف ولا تُحذف: تختفي من القوائم والمجاميع، وتبقى بياناتها كلها، وتُسترجع من «المؤرشفة». متابعة؟`
+    : `حذف السيارة ${c.plate} نهائياً؟ لا متابعات عليها ولا دفعات.`, async () => {
+    try {
+      const r = await api('/cars/' + c.id, { method: 'DELETE' });
+      closeModal();
+      toast(r.archived ? 'أُرشفت — تجدها في «المؤرشفة»' : 'حُذفت', 'ok');
+      loadCars();
+    } catch (e) { toast(e.message, 'bad'); }
   });
 }
 
@@ -1441,29 +1496,58 @@ $('#btn-add-car').onclick = () => {
 /* ============================================================
    الموظفون
    ============================================================ */
+let showArchivedUsers = false;
+
 async function loadUsers() {
   const tb = $('#users-body');
   tb.innerHTML = '<tr><td colspan="9" class="empty"><span class="spin"></span> جارٍ التحميل…</td></tr>';
+
+  // زرّ «المؤرشفون» لمن يؤرشف ويسترجع — يُحقن مرة، ويُنزع لمن لا يملكه
+  const bar = $('#btn-add-user')?.parentElement;
+  let toggle = $('#btn-archived-users');
+  if (cap('employees.delete') && bar && !toggle) {
+    bar.insertAdjacentHTML('afterbegin', '<button class="btn" id="btn-archived-users"></button>');
+    toggle = $('#btn-archived-users');
+    toggle.onclick = () => { showArchivedUsers = !showArchivedUsers; loadUsers(); };
+  } else if (!cap('employees.delete') && toggle) { toggle.remove(); toggle = null; showArchivedUsers = false; }
+  if (toggle) toggle.textContent = showArchivedUsers ? '← الموظفون الحاليون' : 'المؤرشفون';
+
   let d;
-  try { d = await api('/users'); }
+  try { d = await api('/users' + (showArchivedUsers ? '?archived=1' : '')); }
   catch (e) { tb.innerHTML = `<tr><td colspan="9" class="empty">${esc(e.message)}</td></tr>`; return; }
   S.roleLabels = d.role_labels || {};
 
-  tb.innerHTML = d.users.map((u) => `<tr>
+  if (d.archived && !d.users.length) {
+    tb.innerHTML = '<tr><td colspan="9" class="empty">لا يوجد موظفون مؤرشفون.</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = d.users.map((u) => `<tr${u.archived_at ? ' style="opacity:.7"' : ''}>
     <td><b>${esc(u.emp_code)}</b></td>
-    <td>${esc(u.name)}</td>
+    <td>${esc(u.name)}${u.archived_at ? `<br><small class="muted">أُرشف ${dt(u.archived_at)}${
+      u.archived_by_name ? ' · ' + esc(u.archived_by_name) : ''}${u.archive_reason ? ' · ' + esc(u.archive_reason) : ''}</small>` : ''}</td>
     <td class="num">${esc(u.username)}</td>
     <td><span class="badge ${u.role === 'manager' || u.role === 'supervisor' ? 'info' : ''}">${esc(roleLabel(u.role))}</span></td>
     <td class="num">${esc(u.phone || '—')}</td>
     <td class="num">${u.max_cars ?? `<span class="muted">افتراضي (${esc(S.settings.default_max_cars || 30)})</span>`}</td>
     <td class="num"><b>${num(u.cars_count)}</b></td>
-    <td><span class="badge ${u.active ? 'ok' : 'bad'}">${u.active ? 'نشط' : 'موقوف'}</span></td>
-    <td class="row gap">
-      ${cap('employees.edit') ? `<button class="btn sm" data-edit="${u.id}">تعديل</button>
+    <td>${u.archived_at ? '<span class="badge">مؤرشف</span>'
+         : `<span class="badge ${u.active ? 'ok' : 'bad'}">${u.active ? 'نشط' : 'موقوف'}</span>`}</td>
+    <td class="row gap">${u.archived_at
+      ? (cap('employees.delete') ? `<button class="btn sm primary" data-restore="${u.id}">استرجاع</button>` : '')
+      : `${cap('employees.edit') ? `<button class="btn sm" data-edit="${u.id}">تعديل</button>
       <button class="btn sm" data-pw="${u.id}">كلمة المرور</button>
       <button class="btn sm" data-links="${u.id}">زملاء التواصل</button>` : ''}
-      ${cap('employees.delete') && u.id !== S.user.id ? `<button class="btn sm danger" data-del="${u.id}">حذف</button>` : ''}
+      ${cap('employees.delete') && u.id !== S.user.id ? `<button class="btn sm danger" data-del="${u.id}">إخراج</button>` : ''}`}
     </td></tr>`).join('');
+
+  $$('#users-body [data-restore]').forEach((b) => b.onclick = () => {
+    const u = d.users.find((x) => x.id === +b.dataset.restore);
+    confirmBox(`استرجاع ${u.name}؟ يعود حسابه نشطاً ويدخل بكلمة مروره نفسها.`, async () => {
+      try { await api(`/users/${u.id}/restore`, { method: 'POST' }); toast('استُرجع الحساب', 'ok'); await loadEmployees(); loadUsers(); }
+      catch (e) { toast(e.message, 'bad'); }
+    }, false);
+  });
 
   $$('#users-body [data-edit]').forEach((b) => b.onclick = () =>
     userForm(d.users.find((u) => u.id === +b.dataset.edit)));
@@ -1599,19 +1683,27 @@ function resetPw(id) {
 
 function delUser(u) {
   const others = S.employees.filter((e) => e.id !== u.id);
-  const b = openModal('حذف موظف', `
-    <p>سيتم حذف <b>${esc(u.name)}</b> نهائياً. لديه <b>${num(u.cars_count)}</b> سيارة.</p>
+  /* الخادم يقرّر الحذف أو الأرشفة بحسب ما بُني على الحساب — فالنافذة لا
+     تَعِد بـ"حذف نهائي" قد لا يقع. تقول القاعدة، والنتيجة تقول ما حدث. */
+  const b = openModal('إخراج موظف', `
+    <p><b>${esc(u.name)}</b> — لديه <b>${num(u.cars_count)}</b> سيارة.</p>
+    <div class="alert info" style="margin:.4rem 0 .8rem">إن كان له متابعات أو دفعات أو مسيّرات
+      <b>يُؤرشف ولا يُحذف</b>: يُوقف حسابه ويخرج من القوائم، ويبقى كل ما له، ويُسترجع بضغطة.
+      والحذف النهائي لحسابٍ لم يُبنَ عليه شيء.</div>
     <label>نقل سياراته إلى
       <select id="mv"><option value="">— اتركها غير مسندة —</option>
         ${others.map((e) => `<option value="${e.id}">${esc(e.name)} (${e.cars_count})</option>`).join('')}</select>
     </label>
-    <div class="modal-actions"><button class="btn danger" id="dl-yes">حذف نهائي</button>
+    <label>السبب (اختياري)<input id="dl-reason" maxlength="200" placeholder="مثال: انتهى عقده"></label>
+    <div class="modal-actions"><button class="btn danger" id="dl-yes">إخراج</button>
       <button class="btn" id="dl-no">إلغاء</button></div>`, 'narrow');
   $('#dl-no', b).onclick = closeModal;
   $('#dl-yes', b).onclick = async () => {
     try {
-      await api('/users/' + u.id, { method: 'DELETE', body: { move_to: $('#mv', b).value || null } });
-      closeModal(); toast('تم حذف الموظف', 'ok');
+      const r = await api('/users/' + u.id, { method: 'DELETE', body: {
+        move_to: $('#mv', b).value || null, reason: $('#dl-reason', b).value } });
+      closeModal();
+      toast(r.archived ? `أُرشف ${u.name} — تجده في «المؤرشفون»` : 'حُذف الحساب', 'ok');
       await loadEmployees(); loadUsers();
     } catch (ex) { toast(ex.message, 'bad'); }
   };
@@ -2317,10 +2409,15 @@ function renderPermTable() {
         <div class="perm-group-head">${esc(g.name)}</div>
         ${g.caps.map((c) => {
           const off = locked.has(c.key);
-          return `<label class="perm-row ${off ? 'perm-locked' : ''}">
+          // الأرضية: قدرةٌ لا تنزل عن مستوى — مطفأة هنا مهما ضُغطت، ونقول لماذا
+          const fl = (permData.floors || {})[c.key];
+          const floored = !!fl && role.rank < fl.rank;
+          const dead = off || floored;
+          return `<label class="perm-row ${dead ? 'perm-locked' : ''}">
             <input type="checkbox" data-capk="${esc(c.key)}"
-              ${on[c.key] ? 'checked' : ''} ${role.editable && !off ? '' : 'disabled'}>
-            <span>${esc(c.label)}${off ? ' <span class="badge warn">تحتاج ترقية الباقة</span>' : ''}</span>
+              ${on[c.key] && !floored ? 'checked' : ''} ${role.editable && !dead ? '' : 'disabled'}>
+            <span>${esc(c.label)}${off ? ' <span class="badge warn">تحتاج ترقية الباقة</span>' : ''}${
+              floored ? ` <span class="badge">لا تنزل عن «${esc(fl.label)}»</span>` : ''}</span>
           </label>`;
         }).join('')}
       </div>`).join('')}`;

@@ -191,9 +191,12 @@ router.post('/preview', P.needs('cars.import'), upload.single('file'), async (re
       }
       seenKeys.set(key, rowNo);
 
-      if ((await db.prepare('SELECT 1 FROM cars WHERE plate_key=?').get(key))) {
+      const inDb = await db.prepare('SELECT archived_at FROM cars WHERE plate_key=?').get(key);
+      if (inDb) {
         dupInDb++;
-        issues.push({ row: rowNo, level: 'تنبيه', msg: `اللوحة "${plate}" موجودة مسبقاً في النظام` });
+        issues.push({ row: rowNo, level: 'تنبيه', msg: inDb.archived_at
+          ? `اللوحة "${plate}" مؤرشفة في النظام — لن تُستورد حتى تُسترجع`
+          : `اللوحة "${plate}" موجودة مسبقاً في النظام` });
       }
 
       const ph = U.normalizePhone(mapping.driver_phone !== undefined ? r[mapping.driver_phone] : '');
@@ -367,7 +370,14 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
       seenKeys.add(key);
 
       // اللوحة الموجودة مسبقاً: نتخطاها قبل حجز مكان لدى موظف
-      const existing = (await tx.prepare('SELECT id FROM cars WHERE plate_key=?').get(key));
+      const existing = (await tx.prepare('SELECT id, archived_at FROM cars WHERE plate_key=?').get(key));
+      /* المؤرشفة لا يُعيدها استيرادٌ بصمت: أرشفتُها قرارُ إنسان، والاستيراد
+         الذي ينقضه دون أن يراه أحد يُرجع ما أُخرج عمداً. تُتجاهل ويقول السجل لماذا. */
+      if (existing && existing.archived_at) {
+        skipped++;
+        log.push({ row: rowNo, action: 'تجاهل', reason: `اللوحة ${plate} مؤرشفة — استرجعها ثم أعد الاستيراد` });
+        continue;
+      }
       if (existing && onDuplicate === 'skip') {
         skipped++;
         log.push({ row: rowNo, action: 'تجاهل', reason: `اللوحة ${plate} موجودة مسبقاً` });
