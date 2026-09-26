@@ -6,6 +6,7 @@ const U = require('../util');
 const { getSetting } = require('../settings');
 const P = require('../permissions');
 const RES = require('../results');
+const D = require('../departments');
 
 const router = express.Router();
 
@@ -36,11 +37,41 @@ const CAR_SELECT = `
              FROM charges GROUP BY car_id) ch ON ch.car_id = c.id
 `;
 
-// الموظف يرى سياراته فقط؛ المدير يرى الكل
+// الموظف يرى سياراته فقط؛ ورئيس القسم معها سيارات موظفي قسمه؛ والمدير يرى الكل
 function scopeClause(user, params) {
   if (A.isManagerLevel(user)) return '1=1';
+  // هيئة النقل تطّلع على كل المركبات — قراءةً فقط، والكتابة تمرّ من canTouchCar كما هي
+  if (P.can(user, 'transport.view_all')) return '1=1';
+  const under = D.membersUnder(user);
   params.push(user.id);
-  return 'c.assigned_to = ?';
+  if (!under.length) return 'c.assigned_to = ?';
+  params.push(...under);
+  return `(c.assigned_to = ? OR c.assigned_to IN (${under.map(() => '?').join(',')}))`;
+}
+
+/* ما يُسجَّل في «سجل تعديلات السيارات»: الخانة باسمها العربي، والقيمة كما
+   يقرؤها الناس — اسم الموظف لا رقمه، و«نعم» لا 1. */
+const EDIT_FIELDS = {
+  plate: 'رقم اللوحة', car_type: 'نوع السيارة', driver_name: 'اسم السائق', driver_phone: 'رقم التواصل',
+  driver_id_no: 'هوية السائق', contract_no: 'رقم العقد', contract_start: 'بداية العقد',
+  contract_months: 'مدة العقد (أشهر)', installment_amount: 'القسط', contract_value: 'قيمة العقد',
+  installments_paid: 'الأقساط المدفوعة', ownership_transferred: 'نقل الملكية', total_amount: 'المبلغ',
+  status: 'الحالة', assigned_to: 'الموظف المسؤول', notes: 'ملاحظات',
+};
+async function userName(id) {
+  if (!id) return 'غير مسندة';
+  return (await db.prepare('SELECT name FROM users WHERE id=?').get(id))?.name || `#${id}`;
+}
+async function diffCar(before, after) {
+  const out = [];
+  for (const [k, label] of Object.entries(EDIT_FIELDS)) {
+    const a = before[k], b = after[k];
+    if (String(a ?? '') === String(b ?? '')) continue;
+    if (k === 'assigned_to') out.push({ field: label, old_value: await userName(a), new_value: await userName(b) });
+    else if (k === 'ownership_transferred') out.push({ field: label, old_value: a ? 'نعم' : 'لا', new_value: b ? 'نعم' : 'لا' });
+    else out.push({ field: label, old_value: a, new_value: b });
+  }
+  return out;
 }
 
 function canTouchCar(user, car) {
@@ -119,9 +150,13 @@ router.get('/', A.requireAuth, async (req, res) => {
   }
   if (req.query.status) { where.push('c.status = ?'); params.push(String(req.query.status)); }
   if (req.query.car_type) { where.push('c.car_type = ?'); params.push(String(req.query.car_type)); }
-  if (A.isManagerLevel(req.user) && req.query.assigned_to) {
+  if ((A.isManagerLevel(req.user) || P.can(req.user, 'transport.view_all')) && req.query.assigned_to) {
     if (req.query.assigned_to === 'none') where.push('c.assigned_to IS NULL');
     else { where.push('c.assigned_to = ?'); params.push(parseInt(req.query.assigned_to, 10)); }
+  } else if (req.query.assigned_to) {
+    // رئيس القسم يصفّي بموظفي قسمه — ونطاقه أعلاه يمنع ما سواهم أصلاً
+    const want = parseInt(req.query.assigned_to, 10);
+    if (want === req.user.id || D.membersUnder(req.user).includes(want)) { where.push('c.assigned_to = ?'); params.push(want); }
   }
   if (req.query.no_phone === '1') where.push("(c.driver_phone IS NULL OR c.driver_phone = '')");
   if (req.query.never_contacted === '1') where.push('IFNULL(f.cnt,0) = 0');
@@ -172,8 +207,12 @@ router.get('/:id', A.requireAuth, async (req, res) => {
 
   // زميل التواصل يقرأ السيارة المُحالة إليه، ولا يكتب عليها شيئاً
   const mine = canTouchCar(req.user, car);
-  const referred = mine ? false : await referredToMe(req.user, id);
-  if (!mine && !referred) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  // رئيس القسم يرى سيارات موظفي قسمه، ويعمل عليها بما منحه المدير
+  const asHead = !mine && D.isHeadOver(req.user, car.assigned_to);
+  // هيئة النقل: تقرأ كل مركبة، ولا تكتب إلا خاناتها — فتُعرض لها للقراءة
+  const asTransport = !mine && !asHead && P.can(req.user, 'transport.view_all');
+  const referred = mine || asHead || asTransport ? false : await referredToMe(req.user, id);
+  if (!mine && !asHead && !asTransport && !referred) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
 
   const followUps = (await db.prepare(`
     SELECT f.*, u.name AS user_name, u.emp_code, v.name AS via_name
@@ -201,10 +240,42 @@ router.get('/:id', A.requireAuth, async (req, res) => {
   if (car.archived_at && car.archived_by)
     car.archived_by_name = (await db.prepare('SELECT name FROM users WHERE id=?').get(car.archived_by))?.name || null;
 
+  /* سجل تعديلات هذه السيارة — يراه كل من يرى السيارة. وفتحُ صاحبها لها
+     يُطفئ تنبيه «عُدّلت سيارتك»: رآها الآن بعينه. */
+  const edits = await db.prepare(`SELECT plate, field, old_value, new_value, editor_name, editor_as, owner_name, created_at
+    FROM car_edits WHERE car_id=? ORDER BY id DESC LIMIT 100`).all(id).catch(() => []);
+  if (mine && Number(car.assigned_to) === req.user.id)
+    await db.prepare('UPDATE car_edits SET seen_at=? WHERE car_id=? AND owner_id=? AND seen_at IS NULL')
+      .run(U.now(), id, req.user.id).catch(() => {});
+
+  // ما يستطيعه رئيس القسم على هذه السيارة — والخادم يفحص كل كتابة أيضاً
+  let head;
+  if (asHead) {
+    const dept = D.departmentOf(car.assigned_to);
+    head = {
+      department: dept?.name || null,
+      edit: P.can(req.user, 'dept.cars.edit'),
+      followup: P.can(req.user, 'dept.cars.followup'),
+      assign: P.can(req.user, 'dept.cars.assign'),
+    };
+    if (head.assign) {
+      const ids = D.membersUnder(req.user);
+      head.members = ids.length ? await db.prepare(
+        `SELECT id, name FROM users WHERE active=1 AND id IN (${ids.map(() => '?').join(',')}) ORDER BY name`).all(...ids) : [];
+    }
+  }
+
+  /* بيانات هيئة النقل والتراخيص — يراها كل من يرى السيارة، ويعدّلها من
+     يملك صلاحيتها وحده. */
+  const transport = await db.prepare(`SELECT t.operating_card, t.driver_card, t.gps, t.updated_at, u.name AS updated_by_name
+    FROM car_transport t LEFT JOIN users u ON u.id = t.updated_by WHERE t.car_id=?`).get(id).catch(() => null) || {};
+
   // read_only يقول للواجهة: اعرض ولا تفتح نموذجاً — والخادم يمنع أصلاً.
   // والمؤرشفة للقراءة كذلك حتى تُسترجع.
-  res.json({ car, follow_ups: followUps, payments, charges,
-             read_only: (referred || !!car.archived_at) || undefined });
+  res.json({ car, follow_ups: followUps, payments, charges, edits, head, transport,
+             view_as: asTransport ? 'transport' : referred ? 'referral' : undefined,
+             can_transport_edit: P.can(req.user, 'transport.edit') && !car.archived_at,
+             read_only: (referred || asTransport || !!car.archived_at) || undefined });
 });
 
 // ================= إضافة سيارة (المدير فقط) =================
@@ -269,11 +340,13 @@ router.put('/:id', A.requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  // رئيس القسم يعدّل سيارات موظفي قسمه كاملةً — ومنها المبلغ — إن منحه المدير ذلك
+  const asHead = !canTouchCar(req.user, car) && D.headCan(req.user, car, 'dept.cars.edit');
+  if (!canTouchCar(req.user, car) && !asHead) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
   if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
-  const isMgr = P.can(req.user, 'cars.edit');
+  const isMgr = P.can(req.user, 'cars.edit') || asHead;
 
   // من لا يملك cars.edit يصحّح بيانات التواصل فقط — لا اللوحة ولا المبلغ ولا العقد ولا الإسناد
   const phoneInfo = b.driver_phone !== undefined
@@ -291,6 +364,8 @@ router.put('/:id', A.requireAuth, async (req, res) => {
       b.notes !== undefined ? (String(b.notes).trim() || null) : car.notes,
       id
     ));
+    const after = await db.prepare('SELECT * FROM cars WHERE id=?').get(id);
+    await D.logCarEdit(req.user, car, await diffCar(car, after));
     A.audit(req.user.id, 'تعديل بيانات تواصل', 'cars', id, { plate: car.plate });
     return res.json({ ok: true, phone_warning: phoneInfo.phone && !phoneInfo.valid ? phoneInfo.reason : null });
   }
@@ -305,8 +380,18 @@ router.put('/:id', A.requireAuth, async (req, res) => {
   if (dup) return res.status(409).json({ error: `اللوحة مسجّلة على سيارة أخرى "${dup.plate}"` });
 
   let assignedTo = car.assigned_to;
-  if (b.assigned_to !== undefined)
-    assignedTo = b.assigned_to === null || b.assigned_to === '' ? null : parseInt(b.assigned_to, 10);
+  if (b.assigned_to !== undefined) {
+    const want = b.assigned_to === null || b.assigned_to === '' ? null : parseInt(b.assigned_to, 10);
+    /* رئيس القسم لا ينقل السيارة إلا بصلاحية يمنحها المدير، ولموظفٍ من قسمه
+       فقط — لا يخرجها من القسم، ولا يتركها بلا صاحب، ولا يأخذها لنفسه. */
+    if (asHead && want !== car.assigned_to) {
+      if (!P.can(req.user, 'dept.cars.assign'))
+        return res.status(403).json({ error: 'نقل السيارات بين موظفي القسم يحتاج صلاحية يمنحها المدير' });
+      if (!want || !D.membersUnder(req.user).includes(want))
+        return res.status(400).json({ error: 'تُنقل السيارة لموظفٍ من قسمك فقط' });
+    }
+    assignedTo = want;
+  }
 
   (await db.prepare(`
     UPDATE cars SET plate=?, plate_key=?, plate_letters=?, plate_digits=?,
@@ -336,7 +421,10 @@ router.put('/:id', A.requireAuth, async (req, res) => {
     id
   ));
 
-  A.audit(req.user.id, 'تعديل سيارة', 'cars', id, { plate });
+  // قبل refreshStatus: السجل يحفظ ما غيّره هو، لا ما حسبه النظام بعده
+  const after = await db.prepare('SELECT * FROM cars WHERE id=?').get(id);
+  await D.logCarEdit(req.user, car, await diffCar(car, after));
+  A.audit(req.user.id, asHead ? 'تعديل سيارة (رئيس القسم)' : 'تعديل سيارة', 'cars', id, { plate });
   await refreshStatus(id);
   res.json({ ok: true, phone_warning: phoneInfo.phone && !phoneInfo.valid ? phoneInfo.reason : null });
 });
@@ -409,9 +497,36 @@ router.post('/assign', P.needs('cars.assign'), async (req, res) => {
 
   const stmt = db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','+3 hours') WHERE id=? AND archived_at IS NULL");
   let updated = 0;
-  for (const id of ids) updated += Number((await stmt.run(to, id)).changes || 0);
+  const toName = await userName(to);
+  for (const id of ids) {
+    const before = await db.prepare('SELECT id, plate, assigned_to FROM cars WHERE id=? AND archived_at IS NULL').get(id);
+    const n = Number((await stmt.run(to, id)).changes || 0);
+    updated += n;
+    if (n && before && Number(before.assigned_to || 0) !== Number(to || 0))
+      await D.logCarEdit(req.user, before, [{ field: 'الموظف المسؤول', old_value: await userName(before.assigned_to), new_value: toName }]);
+  }
   A.audit(req.user.id, 'إسناد سيارات', 'cars', null, { count: updated, to });
   res.json({ ok: true, updated });
+});
+
+/* رئيس القسم ينقل سيارة بين موظفي قسمه — بصلاحيةٍ يمنحها المدير، ولو لم
+   يملك تعديل بياناتها. لا يُخرجها من القسم، ولا يأخذها لنفسه. */
+router.post('/:id(\\d+)/move', A.requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = await db.prepare('SELECT * FROM cars WHERE id=?').get(id);
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (!D.headCan(req.user, car, 'dept.cars.assign'))
+    return res.status(403).json({ error: 'نقل السيارات بين موظفي القسم يحتاج صلاحية يمنحها المدير' });
+  if (archivedGuard(car, res)) return;
+  const to = parseInt(req.body?.assigned_to, 10);
+  if (!to || !D.membersUnder(req.user).includes(to)) return res.status(400).json({ error: 'تُنقل السيارة لموظفٍ من قسمك فقط' });
+  if (to === Number(car.assigned_to)) return res.status(400).json({ error: 'السيارة عنده أصلاً' });
+  if (!(await db.prepare('SELECT 1 FROM users WHERE id=? AND active=1').get(to)))
+    return res.status(400).json({ error: 'الموظف غير موجود أو موقوف' });
+  await db.prepare("UPDATE cars SET assigned_to=?, updated_at=datetime('now','+3 hours') WHERE id=?").run(to, id);
+  await D.logCarEdit(req.user, car, [{ field: 'الموظف المسؤول', old_value: await userName(car.assigned_to), new_value: await userName(to) }]);
+  A.audit(req.user.id, 'نقل سيارة (رئيس القسم)', 'cars', id, { plate: car.plate, إلى: to });
+  res.json({ ok: true });
 });
 
 // توزيع تلقائي — المدير هو من يحدد السقف (افتراضي من الإعدادات أو سقف كل موظف)
@@ -429,6 +544,9 @@ router.post('/distribute', P.needs('cars.assign'), async (req, res) => {
 
   const defaultCap = parseInt(getSetting('default_max_cars', '30'), 10) || 30;
 
+  // من كانت عنده كل سيارة قبل التوزيع — ليقول السجل «من فلان إلى فلان» لا «من لا أحد»
+  const prevOwner = new Map((await db.prepare('SELECT id, plate, assigned_to FROM cars WHERE archived_at IS NULL').all())
+    .map((c) => [c.id, c]));
   if (includeAssigned) (await db.prepare('UPDATE cars SET assigned_to=NULL').run());
 
   const pool = (await db.prepare(`
@@ -452,7 +570,21 @@ router.post('/distribute', P.needs('cars.assign'), async (req, res) => {
     if (tries >= slots.length) break; // امتلأ الجميع
     const s = slots[i % slots.length];
     await upd.run(s.id, car.id);
+    const was = prevOwner.get(car.id);
+    if (was && Number(was.assigned_to || 0) !== s.id)
+      await D.logCarEdit(req.user, was, [{ field: 'الموظف المسؤول', old_value: await userName(was.assigned_to), new_value: s.name }]);
     s.free--; s.got++; distributed++; i++;
+  }
+
+  /* «إعادة توزيع الكل» تفرّغ كل السيارات أولاً، والمسدّدة لا تُوزَّع من جديد —
+     فتبقى بلا صاحب. يُسجَّل ذلك أيضاً، وإلا اختفى صاحبها من السيارة بلا أثر. */
+  if (includeAssigned) {
+    const now = await db.prepare('SELECT id, assigned_to FROM cars WHERE archived_at IS NULL AND assigned_to IS NULL').all();
+    for (const c of now) {
+      const was = prevOwner.get(c.id);
+      if (was?.assigned_to)
+        await D.logCarEdit(req.user, was, [{ field: 'الموظف المسؤول', old_value: await userName(was.assigned_to), new_value: 'غير مسندة' }]);
+    }
   }
 
   A.audit(req.user.id, 'توزيع تلقائي', 'cars', null, { distributed, per_employee: perEmployee });
@@ -467,7 +599,9 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   const id = parseInt(req.params.id, 10);
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  // رئيس القسم يسجّل على سيارات موظفيه — وتُقيَّد باسمه هو، لا باسم صاحبها
+  const asHead = !canTouchCar(req.user, car) && D.headCan(req.user, car, 'dept.cars.followup');
+  if (!canTouchCar(req.user, car) && !asHead) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
   if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
@@ -520,6 +654,8 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   (await db.prepare("UPDATE cars SET status=?, updated_at=datetime('now','+3 hours') WHERE id=?").run(status, id));
   await refreshStatus(id);
 
+  if (asHead) await D.logCarEdit(req.user, car, [{ field: 'متابعة جديدة', old_value: null,
+    new_value: rc.code + (note ? ' — ' + note : '') + (promise ? ' · وعد ' + promise : '') }]);
   A.audit(req.user.id, 'تسجيل متابعة', 'cars', id, { result: rc.code });
   const count = (await db.prepare('SELECT COUNT(*) n FROM follow_ups WHERE car_id=?').get(id)).n;
   res.status(201).json({ id: Number(info.lastInsertRowid), contact_count: count, status });
@@ -545,7 +681,8 @@ router.post('/:id/payments', P.needs('payments.create'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  const asHead = !canTouchCar(req.user, car) && D.headCan(req.user, car, 'dept.cars.followup');
+  if (!canTouchCar(req.user, car) && !asHead) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
   if (archivedGuard(car, res)) return;
 
   const b = req.body || {};
@@ -577,6 +714,8 @@ router.post('/:id/payments', P.needs('payments.create'), async (req, res) => {
   }
   await refreshStatus(id);
 
+  if (asHead) await D.logCarEdit(req.user, car, [{ field: 'سداد جديد', old_value: null,
+    new_value: `${amount} (${method}) — ${paidAt}` }]);
   A.audit(req.user.id, 'تسجيل دفعة', 'cars', id, { amount, method });
   const newPaid = (await db.prepare('SELECT IFNULL(SUM(amount),0) s FROM payments WHERE car_id=?').get(id)).s;
   res.status(201).json({
@@ -838,7 +977,8 @@ router.post('/:id/state', P.needs('cars.set_state'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const car = (await db.prepare('SELECT id, plate, car_state, assigned_to, archived_at FROM cars WHERE id=?').get(id));
   if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  if (!canTouchCar(req.user, car)) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
+  const asHead = !canTouchCar(req.user, car) && D.headCan(req.user, car, 'dept.cars.followup');
+  if (!canTouchCar(req.user, car) && !asHead) return res.status(403).json({ error: 'هذه السيارة غير مسندة لك' });
   if (archivedGuard(car, res)) return;
 
   const raw = String((req.body || {}).car_state ?? '').trim();
@@ -847,9 +987,49 @@ router.post('/:id/state', P.needs('cars.set_state'), async (req, res) => {
   const state = raw || null;      // الفراغ يعني "بلا حالة"
 
   (await db.prepare("UPDATE cars SET car_state=?, updated_at=? WHERE id=?").run(state, U.now(), id));
+  await D.logCarEdit(req.user, car, [{ field: 'حالة السيارة', old_value: car.car_state, new_value: state }]);
   A.audit(req.user.id, 'تحديد حالة سيارة', 'cars', id,
     { plate: car.plate, من: car.car_state || '—', إلى: state || '—' });
   res.json({ ok: true, car_state: state });
+});
+
+/* =============================================================================
+   هيئة النقل — ثلاث خانات لكل مركبة
+   ---------------------------------------------------------------------------
+   الخانات (بطاقة التشغيل، بطاقة السائق، تفعيل GPS) يعدّلها من يملك صلاحية
+   هيئة النقل وحده، ويراها كل من يرى السيارة. وكل تغيير في سجل تعديلات
+   السيارات، ويُنبَّه صاحب السيارة. (التراخيص مكتبةٌ عامة: routes/licenses.js)
+   ============================================================================= */
+const TRANSPORT_FIELDS = { operating_card: 'بطاقة التشغيل', driver_card: 'بطاقة السائق', gps: 'تفعيل GPS' };
+const yesNo = (v) => (v === null || v === undefined ? null : Number(v) ? 'صح' : 'خطأ');
+
+router.put('/:id(\\d+)/transport', P.needs('transport.edit'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const car = await db.prepare('SELECT id, plate, assigned_to, archived_at FROM cars WHERE id=?').get(id);
+  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
+  if (archivedGuard(car, res)) return;
+
+  const b = req.body || {};
+  // صح / خطأ / لم تُحدَّد — ولا شيء غيرها
+  const read = (v) => (v === undefined ? undefined : v === null || v === '' ? null
+    : (v === true || v === 1 || v === '1' || v === 'true') ? 1 : (v === false || v === 0 || v === '0' || v === 'false') ? 0 : 'bad');
+  const cur = await db.prepare('SELECT * FROM car_transport WHERE car_id=?').get(id) || {};
+  const next = {};
+  for (const k of Object.keys(TRANSPORT_FIELDS)) {
+    const v = read(b[k]);
+    if (v === 'bad') return res.status(400).json({ error: `قيمة غير مفهومة لـ«${TRANSPORT_FIELDS[k]}» — صح أو خطأ` });
+    next[k] = v === undefined ? (cur[k] ?? null) : v;
+  }
+  await db.prepare(`INSERT INTO car_transport (car_id, operating_card, driver_card, gps, updated_by, updated_at)
+    VALUES (?,?,?,?,?,?) ON CONFLICT(car_id) DO UPDATE SET operating_card=excluded.operating_card,
+    driver_card=excluded.driver_card, gps=excluded.gps, updated_by=excluded.updated_by, updated_at=excluded.updated_at`)
+    .run(id, next.operating_card, next.driver_card, next.gps, req.user.id, U.now());
+
+  const n = await D.logCarEdit(req.user, car, Object.entries(TRANSPORT_FIELDS)
+    .map(([k, label]) => ({ field: label, old_value: yesNo(cur[k]), new_value: yesNo(next[k]) })));
+  if (n) A.audit(req.user.id, 'بيانات هيئة النقل', 'cars', id, { plate: car.plate,
+    ...Object.fromEntries(Object.entries(TRANSPORT_FIELDS).map(([k, l]) => [l, yesNo(next[k]) || '—'])) });
+  res.json({ ok: true, transport: next, changed: n });
 });
 
 module.exports = router;

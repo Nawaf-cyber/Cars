@@ -83,6 +83,11 @@ const USER_LINKS = [
   // الطلبات والمهام والمرفقات: صاحب الطلب ومن ردّ، ومن أُسندت إليه ومن أرسلها
   ['hr_requests', 'user_id'], ['hr_requests', 'decided_by'], ['leave_balances', 'updated_by'],
   ['attachments', 'created_by'], ['tasks', 'assignee_id'], ['tasks', 'created_by'],
+  // الأقسام وسجل تعديلات السيارات: الرئيس، ومن أضاف، وصاحب السيارة ومن عدّل
+  ['departments', 'head_id'], ['departments', 'created_by'], ['department_members', 'added_by'],
+  ['car_edits', 'owner_id'], ['car_edits', 'editor_id'],
+  // هيئة النقل: من عدّل بيانات المركبة
+  ['car_transport', 'updated_by'],
 ];
 
 /* جداول تشير إلى users بـ ON DELETE CASCADE — أي أن حذف جدول المستخدمين
@@ -92,7 +97,7 @@ const USER_LINKS = [
    فلو أُعيد بناء المستخدمين على قاعدةٍ فيها رواتب لمُحيت كلها. لم يقع لأن
    جدول الرواتب فارغ عند الشركة، لا لأن شيئاً كان يمنعه. */
 const CASCADE_TABLES = ['contact_links', 'referrals', 'salaries', 'payroll_items', 'attendance',
-                        'user_archive', 'leave_balances'];
+                        'user_archive', 'leave_balances', 'department_members'];
 
 /** لقطة كاملة بصفوف الجداول التي تموت مع المستخدمين. */
 async function snapshotCascades() {

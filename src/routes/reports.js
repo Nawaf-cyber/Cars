@@ -176,19 +176,24 @@ router.get('/performance/:id', P.needs('reports.performance'), async (req, res) 
  * تحمي مشرف الموظفين من مشرف قسمه، ومشرف القسم من الموظف.
  */
 router.get('/audit', P.needs('reports.audit'), async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
+  // صفحات: عددٌ ثابت في الصفحة، والباقي يُقلَّب — لا يُحمَّل السجل كله دفعة
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   // كلٌّ يرى رتبته فأدنى — والأدوار بيانات الآن فالقائمة تتبع الجدول
   const myRank = P.rankOf(req.user.role);
   const visible = Object.values(P.allRoles())
     .filter((r) => r.rank <= myRank).map((r) => r.key);
+  const where = `WHERE u.id IS NULL OR u.role IN (${visible.map(() => '?').join(',')})`;
 
   const rows = (await db.prepare(`
     SELECT a.*, u.name AS user_name
     FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
-    WHERE u.id IS NULL OR u.role IN (${visible.map(() => '?').join(',')})
-    ORDER BY a.id DESC LIMIT ?`).all(...visible, limit));
+    ${where}
+    ORDER BY a.id DESC LIMIT ? OFFSET ?`).all(...visible, limit, (page - 1) * limit));
+  const total = Number((await db.prepare(`SELECT COUNT(*) n FROM audit_log a
+    LEFT JOIN users u ON u.id = a.user_id ${where}`).get(...visible)).n);
 
-  res.json({ log: rows });
+  res.json({ log: rows, total, page, limit, pages: Math.max(Math.ceil(total / limit), 1) });
 });
 
 // ================= تصدير Excel =================
@@ -200,6 +205,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
   const rows = (await db.prepare(`
     SELECT c.plate, c.car_type, c.driver_name, c.driver_phone, c.total_amount,
            IFNULL(p.paid, 0) AS paid,
+           t.operating_card, t.driver_card, t.gps,
            u.name AS emp_name,
            IFNULL(f.cnt, 0) AS contacts,
            (SELECT result_note FROM follow_ups WHERE car_id=c.id AND result_note IS NOT NULL
@@ -209,6 +215,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
     LEFT JOIN users u ON u.id = c.assigned_to
     LEFT JOIN (SELECT car_id, COUNT(*) cnt FROM follow_ups GROUP BY car_id) f ON f.car_id = c.id
     LEFT JOIN (SELECT car_id, SUM(amount) paid FROM payments GROUP BY car_id) p ON p.car_id = c.id
+    LEFT JOIN car_transport t ON t.car_id = c.id
     WHERE ${scope}
     ORDER BY u.name, c.plate`).all());
 
@@ -224,6 +231,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
       phone: r.driver_phone,
       amount: r.total_amount,
       paid: U.money(r.paid),
+      operating_card: r.operating_card, driver_card: r.driver_card, gps: r.gps,
       contacted: r.contacts > 0,
       result: U.resultText(r.code, r.note, fallback),
     });

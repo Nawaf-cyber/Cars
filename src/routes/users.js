@@ -34,10 +34,13 @@ router.get('/', P.needs('employees.view'), async (req, res) => {
   const rows = (await db.prepare(`
     SELECT u.id, u.emp_code, u.name, u.username, u.role, u.phone, u.max_cars, u.active, u.created_at,
            (SELECT COUNT(*) FROM cars c WHERE c.assigned_to = u.id AND c.archived_at IS NULL) AS cars_count,
-           ar.archived_at, ar.reason AS archive_reason, ab.name AS archived_by_name
+           ar.archived_at, ar.reason AS archive_reason, ab.name AS archived_by_name,
+           dm.name AS department, (SELECT GROUP_CONCAT(name, '، ') FROM departments WHERE head_id = u.id) AS heads
     FROM users u
     LEFT JOIN user_archive ar ON ar.user_id = u.id
     LEFT JOIN users ab ON ab.id = ar.archived_by
+    LEFT JOIN department_members m ON m.user_id = u.id
+    LEFT JOIN departments dm ON dm.id = m.department_id
     WHERE ${HIDE_OWNER} AND ar.id IS ${archived ? 'NOT ' : ''}NULL
     ORDER BY u.role DESC, u.name`).all());
   res.json({

@@ -110,6 +110,21 @@ const CAPABILITIES = [
   { key: 'reports.performance', group: 'التقارير', label: 'تقرير أداء الموظفين' },
   { key: 'reports.export',      group: 'التقارير', label: 'تصدير Excel' },
   { key: 'reports.audit',       group: 'التقارير', label: 'سجل النشاط', min_rank: 1 },
+  { key: 'cars.edit_log',       group: 'التقارير', label: 'سجل تعديلات السيارات — كل التعديلات، من كل الأقسام', min_rank: 2 },
+
+  /* الأقسام. صلاحيات «رئيس القسم» تُمنح للمسمّى، لكنها لا تعمل إلا لمن عُيِّن
+     رئيساً لقسم، وعلى سيارات موظفي قسمه وحدهم — لا على سياراته هو، ولا على
+     غير المسندة. فمنحُها لمسمّى «موظف» لا يعطي موظفاً عادياً شيئاً. */
+  { key: 'departments.manage',  group: 'الأقسام', label: 'إنشاء الأقسام وتعيين رئيس كل قسم وموظفيه', min_rank: 2 },
+  { key: 'dept.cars.edit',      group: 'الأقسام', label: 'رئيس القسم — تعديل بيانات سيارات موظفي قسمه، ومنها المبلغ' },
+  { key: 'dept.cars.followup',  group: 'الأقسام', label: 'رئيس القسم — تسجيل متابعة وسداد على سيارات موظفي قسمه' },
+  { key: 'dept.cars.assign',    group: 'الأقسام', label: 'رئيس القسم — نقل السيارات بين موظفي قسمه' },
+
+  /* هيئة النقل: تطّلع على كل المركبات ولا تعدّل منها إلا خاناتها الثلاث
+     (بطاقة التشغيل، بطاقة السائق، تفعيل GPS) — ورئيسها يرفع التراخيص. */
+  { key: 'transport.view_all',  group: 'هيئة النقل', label: 'هيئة النقل — الاطلاع على بيانات كل المركبات (قراءة فقط)' },
+  { key: 'transport.edit',      group: 'هيئة النقل', label: 'هيئة النقل — تعديل بطاقة التشغيل وبطاقة السائق وتفعيل GPS' },
+  { key: 'transport.licenses',  group: 'هيئة النقل', label: 'هيئة النقل — رفع التراخيص (PDF) وتسميتها وحذفها' },
 
   { key: 'salaries.view',      group: 'الرواتب',   label: 'رؤية الرواتب',            plan: true, min_rank: 2 },
   { key: 'salaries.manage',    group: 'الرواتب',   label: 'تعديل الرواتب والمسيّرات', plan: true, min_rank: 2 },
@@ -263,6 +278,13 @@ const MODULE_DEFAULTS_TOP = CAPABILITIES.filter((c) => c.feature).map((c) => c.k
 // لكل موظف: عُهدته، وطلب الدعم، وطلب الإجازة والاستئذان، واستلام مهامه
 const MODULE_DEFAULTS_SELF = ['it.mine', 'it.tickets.raise', 'hr.requests.raise', 'tasks.receive'];
 
+/* رئيس القسم يعدّل ويتابع افتراضياً — ولا ينقل السيارات بين موظفيه حتى
+   يشغّله المدير. تعمل لرؤساء الأقسام وحدهم مهما كان مسمّاهم. */
+const DEPT_DEFAULTS_HEAD = ['dept.cars.edit', 'dept.cars.followup'];
+const DEPT_DEFAULTS_TOP = ['cars.edit_log', 'departments.manage', 'dept.cars.edit', 'dept.cars.followup', 'dept.cars.assign',
+  // هيئة النقل: يحملها المدير ليمنحها لمسمّياتها
+  'transport.view_all', 'transport.edit', 'transport.licenses'];
+
 /** الإعدادات الافتراضية عند أول تشغيل — يعدّلها مشرف الموظفين بعدها كما يشاء. */
 const DEFAULTS = {
   supervisor: [
@@ -276,6 +298,7 @@ const DEFAULTS = {
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
     'settings.manage', 'features.manage', 'roles.manage',
+    ...DEPT_DEFAULTS_TOP,
     ...MODULE_DEFAULTS_TOP,
   ],
   manager: [
@@ -291,6 +314,7 @@ const DEFAULTS = {
     'reports.performance', 'reports.export', 'reports.audit',
     'salaries.view', 'salaries.manage',
     'settings.manage', 'roles.manage',
+    ...DEPT_DEFAULTS_TOP,
     ...MODULE_DEFAULTS_TOP,
   ],
   // مشرف القسم: يراقب بالكامل ولا يعدّل — نقطة البداية، ويضبطها مشرف الموظفين
@@ -301,6 +325,7 @@ const DEFAULTS = {
     'employees.view',
     'reports.performance', 'reports.export',
     ...MODULE_DEFAULTS_SELF,
+    ...DEPT_DEFAULTS_HEAD,
   ],
   employee: [
     'cars.edit_contact', 'cars.set_state', 'followups.create', 'payments.create',
@@ -308,6 +333,7 @@ const DEFAULTS = {
     // يصدّر سياراته وحده — الحصر في المسار لا في الواجهة
     'reports.export',
     ...MODULE_DEFAULTS_SELF,
+    ...DEPT_DEFAULTS_HEAD,
   ],
 };
 

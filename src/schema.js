@@ -495,6 +495,65 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
 
+-- ---------- الأقسام ----------
+-- القسم فريقٌ من الموظفين له رئيس. لا يغيّر صلاحيات أحد بنفسه: الصلاحيات
+-- على المسمّى الوظيفي، والقسم يحدد على من تُطبَّق صلاحيات «رئيس القسم».
+-- العضوية في جدولٍ مستقل لا عمود في users — جدول المستخدمين ضاع مرةً بإعادة
+-- البناء، فلا يُزاد تعريفه عموداً ما دام يمكن الاستغناء.
+CREATE TABLE IF NOT EXISTS departments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL UNIQUE,
+  head_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
+-- الموظف في قسمٍ واحد
+CREATE TABLE IF NOT EXISTS department_members (
+  user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+  added_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  added_at      TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_dept_members ON department_members(department_id);
+
+-- ---------- سجل تعديلات السيارات ----------
+-- سطرٌ لكل خانةٍ تغيّرت: من عدّل، وسيارة من، وكانت كم، وصارت كم.
+-- الأسماء تُحفظ نصاً بجانب الأرقام: لو خرج أحدهم من النظام يبقى السطر يقول
+-- من كان — هذا السجل لحفظ الأمانة، وسطرٌ بلا اسم لا يحفظ شيئاً.
+-- لا مسار يحذف منه، ولا يعدّله.
+-- ---------- بيانات هيئة النقل لكل مركبة ----------
+-- ثلاث خانات صح/خطأ يعدّلها من يملك صلاحية هيئة النقل، ويراها الجميع.
+-- NULL = لم تُحدَّد بعد، لا «خطأ»: غير المعروف ليس نفياً.
+-- جدولٌ مستقل لا أعمدة في cars: لا يُمسّ تعريف جدول السيارات.
+-- والتراخيص (ملفات PDF) في جدول المرفقات بنوع 'car_license'.
+CREATE TABLE IF NOT EXISTS car_transport (
+  car_id         INTEGER PRIMARY KEY REFERENCES cars(id) ON DELETE CASCADE,
+  operating_card INTEGER,                     -- بطاقة التشغيل: 1 صح · 0 خطأ
+  driver_card    INTEGER,                     -- بطاقة السائق
+  gps            INTEGER,                     -- تفعيل GPS
+  updated_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS car_edits (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  car_id      INTEGER REFERENCES cars(id) ON DELETE SET NULL,
+  plate       TEXT,
+  owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- صاحب السيارة وقت التعديل
+  owner_name  TEXT,
+  editor_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  editor_name TEXT,
+  editor_as   TEXT,                           -- بأي صفة: رئيس قسم «…» · مدير الشركة · صاحب السيارة
+  field       TEXT    NOT NULL,               -- اسم الخانة بالعربية
+  old_value   TEXT,
+  new_value   TEXT,
+  seen_at     TEXT,                           -- متى رآه صاحب السيارة — يطفئ تنبيهه
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_car_edits_car   ON car_edits(car_id);
+CREATE INDEX IF NOT EXISTS idx_car_edits_owner ON car_edits(owner_id, seen_at);
+
 CREATE INDEX IF NOT EXISTS idx_ref_helper ON referrals(helper_id, status);
 CREATE INDEX IF NOT EXISTS idx_ref_owner  ON referrals(owner_id, status);
 CREATE INDEX IF NOT EXISTS idx_ref_car    ON referrals(car_id, status);

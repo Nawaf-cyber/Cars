@@ -48,7 +48,8 @@
       <button data-tab="import" data-cap="cars.import">استيراد وتوزيع</button>
       <button data-tab="permissions" data-cap="features.manage|roles.manage">الصلاحيات</button>
       <button data-tab="integrations" data-cap="integrations.manage">ربط البرامج</button>
-      <button data-tab="settings" data-cap="settings.manage|results.manage">الإعدادات</button>
+      <button data-tab="settings" data-cap="settings.manage|results.manage|cars.edit_log|dept.head">الإعدادات</button>
+      <button data-tab="licenses">التراخيص</button>
     </nav>
     <div class="user-box">
       <span id="user-name"></span>
@@ -60,6 +61,9 @@
   </header>
 
   <main>
+    <!-- تنبيه صاحب السيارة: عُدّلت بيانات سيارته بيد غيره -->
+    <div id="edits-banner"></div>
+
     <!-- ---------- لوحة المؤشرات ---------- -->
     <section id="tab-dashboard" class="tab-panel">
       <div class="row between wrap">
@@ -204,6 +208,7 @@
       <div class="row between wrap">
         <h2>الموظفون</h2>
         <div class="row gap">
+          <button class="btn" id="btn-departments" data-cap="departments.manage">الأقسام</button>
           <button class="btn" id="btn-distribute" data-cap="cars.assign">توزيع السيارات تلقائياً</button>
           <button class="btn primary" id="btn-add-user" data-cap="employees.add">+ إضافة موظف</button>
         </div>
@@ -282,6 +287,12 @@
       <div id="integrations-box"></div>
     </section>
 
+    <!-- ---------- التراخيص: ملفات PDF يرفعها من يملك صلاحيتها، ويحمّلها الجميع ---------- -->
+    <section id="tab-licenses" class="tab-panel hidden">
+      <h2>التراخيص</h2>
+      <div id="licenses-box"></div>
+    </section>
+
     <section id="tab-settings" class="tab-panel hidden">
       <h2>الإعدادات</h2>
       <form class="panel form-grid" id="settings-form" data-cap="settings.manage">
@@ -312,12 +323,29 @@
         <h3>قاعدة البيانات والنسخ الاحتياطي</h3>
         <div id="db-status"></div>
       </div>
+      <div class="panel" id="edits-panel" data-cap="cars.edit_log|dept.head">
+        <h3>سجل تعديلات السيارات</h3>
+        <p class="muted" style="margin-bottom:.6rem">
+          كل خانة تغيّرت في بيانات سيارة: من عدّلها وبأي صفة، وسيارة من، وكانت كم وصارت كم.
+          يبقى كما هو — لا يُحذف منه سطر ولا يُعدَّل.
+        </p>
+        <div class="filters">
+          <input id="ed-q" placeholder="لوحة أو اسم">
+          <select id="ed-owner"><option value="">صاحب السيارة: الكل</option></select>
+          <select id="ed-editor"><option value="">من عدّل: الكل</option></select>
+          <label class="inline"><input type="checkbox" id="ed-others" checked> بيد غير صاحبها فقط</label>
+          <label class="inline">من <input type="date" id="ed-from"></label>
+          <label class="inline">إلى <input type="date" id="ed-to"></label>
+        </div>
+        <div id="edits-box"></div>
+      </div>
       <div class="panel" data-cap="reports.audit">
         <h3>سجل النشاط</h3>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>الوقت</th><th>المستخدم</th><th>الإجراء</th><th>التفاصيل</th></tr></thead>
           <tbody id="audit-body"></tbody>
         </table></div>
+        <div id="audit-pager"></div>
       </div>
     </section>
   </main>

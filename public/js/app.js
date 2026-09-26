@@ -148,8 +148,64 @@ function showApp() {
   $('#user-name').textContent = S.user.name;
   $('#user-role').textContent = S.user.role_label || '';
   const mgr = isMgr();
+  // رئيس القسم ليس صلاحيةً تُمنح بل تعيينٌ في قسم — يُضاف هنا ليُظهر ما يخصّه
+  if (S.user.heads) S.user.caps['dept.head'] = 1;
   $$('[data-mgr]').forEach((el) => el.classList.toggle('hidden', !mgr));
   $$('[data-cap]').forEach((el) => el.classList.toggle('hidden', !cap(el.dataset.cap)));
+  checkEditsBanner();
+}
+
+/* ---------------- تنبيه: عُدّلت بيانات سيارتك ----------------
+   صاحب السيارة يعرف حين يغيّر غيرُه شيئاً فيها — رئيس قسمه أو المدير —
+   قبل أن يُحاسَب على رقمٍ لم يكتبه. يتجدد كل دقيقة، ويختفي حين يطّلع. */
+async function checkEditsBanner() {
+  const box = $('#edits-banner');
+  if (!box || !S.user) return;
+  let d;
+  try { d = await api('/departments/edits/unseen'); } catch { return; }
+  if (!d.count) { box.innerHTML = ''; return; }
+  const who = [...new Set(d.edits.map((e) => e.editor_name))].join('، ');
+  box.innerHTML = `<div class="alert warn" style="margin-bottom:.8rem;cursor:pointer" id="edits-go">
+    ⚠ عُدّلت بيانات <b>${d.cars === 1 ? 'سيارة من سياراتك' : num(d.cars) + ' من سياراتك'}</b> بيد ${esc(who)} — <u>اعرض ما تغيّر</u></div>`;
+  $('#edits-go').onclick = () => showUnseenEdits(d.edits);
+}
+if (!window.__editsTimer) window.__editsTimer = setInterval(() => {
+  if (S.user && document.visibilityState === 'visible') checkEditsBanner();
+}, 60000);
+
+// الأرقام بفواصلها (٥٠٬٠٠٠ لا 50000) — وما سواها نصٌّ كما هو
+const editVal = (v) => (v == null ? '<span class="muted">—</span>' : /^-?\d+(\.\d+)?$/.test(v) ? num(Number(v)) : esc(v));
+/** بطاقة التشغيل وأخواتها: ✓ صح · ✗ خطأ · لم تُحدَّد */
+function flagBadge(v) {
+  if (v === null || v === undefined) return '<span class="muted">لم تُحدَّد</span>';
+  return Number(v) ? '<span class="badge ok">✓ صح</span>' : '<span class="badge bad">✗ خطأ</span>';
+}
+
+function editsTable(rows, withOwner) {
+  return `<div class="table-wrap"><table class="data">
+    <thead><tr><th>الوقت</th><th>من عدّل</th>${withOwner ? '<th>سيارة من</th>' : ''}<th>اللوحة</th>
+      <th>الخانة</th><th>كانت</th><th>صارت</th></tr></thead>
+    <tbody>${rows.map((e) => `<tr>
+      <td>${dt(e.created_at)}</td>
+      <td><b>${esc(e.editor_name || '—')}</b><br><small class="muted">${esc(e.editor_as || '')}</small></td>
+      ${withOwner ? `<td>${esc(e.owner_name || 'غير مسندة')}</td>` : ''}
+      <td>${esc(e.plate || '—')}</td>
+      <td>${esc(e.field)}</td>
+      <td>${editVal(e.old_value)}</td>
+      <td><b>${editVal(e.new_value)}</b></td>
+    </tr>`).join('') || `<tr><td colspan="${withOwner ? 7 : 6}" class="empty">لا توجد تعديلات</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+function showUnseenEdits(rows) {
+  const b = openModal('ما تغيّر في سياراتك', `
+    <p class="muted">هذه التعديلات جرت على سياراتك بيد غيرك، وهي محفوظة في سجلٍ لا يُحذف.</p>
+    ${editsTable(rows, false)}
+    <div class="modal-actions"><button class="btn primary" id="edits-seen">اطّلعت</button></div>`, 'wide');
+  $('#edits-seen', b).onclick = async () => {
+    try { await api('/departments/edits/seen', { method: 'POST' }); closeModal(); checkEditsBanner(); }
+    catch (e) { toast(e.message, 'bad'); }
+  };
 }
 
 /* ---------------- شاشة تعذّر الوصول ---------------- */
@@ -231,6 +287,9 @@ async function boot() {
   else purgeExtraUI();   // مستخدم بلا هذه الواجهة: انزع ما حقنه من سبقه
   purgeModules();        // وما حقنته وحداتُ من سبقه — ثم نحمّل وحداته هو
   for (const m of S.user.ui_modules || []) await loadModule(m);
+  // «التراخيص» آخر الشريط — بعد تبويبات الأقسام التي تُحقن عند الدخول
+  const licTab = $('#tabs [data-tab="licenses"]');
+  if (licTab) $('#tabs').appendChild(licTab);
   fillSelect($('#f-status'), S.consts.car_statuses, 'كل الحالات');
   fillSelect($('#f-type'), S.consts.car_types, 'كل الأنواع');
   /* «المؤرشفة» لمن يؤرشف ويسترجع وحده. تُضاف وتُنزع هنا لا في الصفحة —
@@ -319,6 +378,7 @@ const LOADERS = {
   employees: loadUsers, import: loadBatches, settings: loadSettings,
   permissions: loadPermissions, salaries: loadSalaries,
   integrations: loadIntegrations,
+  licenses: loadLicenses,
 };
 function switchTab(name) {
   $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
@@ -877,6 +937,15 @@ function renderCar(b, d) {
      بفحص الإسناد وتُرفض مهما فعلت الواجهة. */
   const ro = !!d.read_only;
   const canDelPay = !ro && cap('payments.delete');
+  /* رئيس القسم على سيارة موظفٍ من قسمه: يعمل عليها بما منحه المدير وحده.
+     وصاحب السيارة يُنبَّه بكل ما يغيّره، والسجل يحفظه باسمه. */
+  const H = d.head || null;
+  const canFollow = !ro && cap('followups.create') && (!H || H.followup);
+  const canPay = !ro && c.remaining > 0 && cap('payments.create') && (!H || H.followup);
+  const showEdit = !ro && (!H || H.edit || H.assign);
+  const edits = d.edits || [];
+  // بيانات هيئة النقل والتراخيص: يراها كل من يرى السيارة
+  const T = d.transport || {};
   $('#modal-title').innerHTML = `<span class="plate">${esc(c.plate)}</span> — ${esc(c.driver_name || 'بدون اسم سائق')} ${statusBadge(c.status)}`;
 
   const progress = c.total_amount > 0 ? Math.min((c.paid_amount / c.total_amount) * 100, 100) : 0;
@@ -888,9 +957,15 @@ function renderCar(b, d) {
         c.archive_reason ? ` · ${esc(c.archive_reason)}` : ''}.
       خارج القوائم والمجاميع، وكل متابعاتها ودفعاتها محفوظة كما كانت. لا تُعدَّل حتى تُسترجع.
       ${cap('cars.delete') ? '<div style="margin-top:.5rem"><button class="btn sm primary" id="car-restore">استرجاع السيارة</button></div>' : ''}
+    </div>` : d.view_as === 'transport' ? `<div class="alert info" style="margin-bottom:.8rem">
+      <b>اطلاع هيئة النقل</b> — تقرأ بيانات المركبة كاملة، ولا تعدّل منها إلا بطاقة التشغيل وبطاقة السائق
+      وتفعيل GPS — من تبويب «هيئة النقل» إن كنت تملك تعديلها.
     </div>` : ro ? `<div class="alert info" style="margin-bottom:.8rem">
       <b>سيارة أُحيلت إليك للتواصل.</b> اقرأ ما تحتاجه قبل الاتصال، ثم أرسل النتيجة
       من قائمة «بالنيابة». لا تُعدَّل بياناتها من هنا — صاحب الملف هو من يعدّل.
+    </div>` : H ? `<div class="alert info" style="margin-bottom:.8rem">
+      <b>سيارة من قسمك</b>${H.department ? ` «${esc(H.department)}»` : ''} — صاحبها <b>${esc(c.assigned_name || '—')}</b>.
+      ما تغيّره يُسجَّل باسمك في «سجل تعديلات السيارات»، ويصله تنبيهٌ به.
     </div>` : ''}
     <div class="detail-grid">
       ${dcell('نوع السيارة', esc(c.car_type))}
@@ -907,6 +982,9 @@ function renderCar(b, d) {
       ${c.car_state ? dcell('حالة السيارة', `<span class="badge">${esc(c.car_state)}</span>`) : ''}
       ${dcell('الموظف المسؤول', esc(c.assigned_name || 'غير مسندة'))}
       ${dcell('أضافها', esc(c.added_by_name || '—') + (c.source === 'استيراد' ? ' (استيراد)' : ''))}
+      ${dcell('بطاقة التشغيل', flagBadge(T.operating_card))}
+      ${dcell('بطاقة السائق', flagBadge(T.driver_card))}
+      ${dcell('تفعيل GPS', flagBadge(T.gps))}
     </div>
     <div class="bar ${progress >= 100 ? 'ok' : progress > 50 ? '' : 'warn'}" style="margin-bottom:1rem">
       <i style="width:${progress}%"></i>
@@ -916,12 +994,16 @@ function renderCar(b, d) {
       <button data-ct="follow" class="active">المتابعات (${d.follow_ups.length})</button>
       <button data-ct="pay">الدفعات (${d.payments.length})</button>
       ${cap('charges.view') ? `<button data-ct="charge">المتأخرات (${d.charges.length})</button>` : ''}
-      ${ro ? '' : '<button data-ct="edit">تعديل البيانات</button>'}
+      ${showEdit ? `<button data-ct="edit">${H && !H.edit ? 'نقل السيارة' : 'تعديل البيانات'}</button>` : ''}
+      ${d.can_transport_edit ? '<button data-ct="transport">هيئة النقل</button>' : ''}
+      ${edits.length ? `<button data-ct="edits">سجل التعديلات (${num(edits.length)})</button>` : ''}
     </div>
     <div id="ct-follow"></div>
     <div id="ct-pay" class="hidden"></div>
     <div id="ct-charge" class="hidden"></div>
-    ${ro ? '' : '<div id="ct-edit" class="hidden"></div>'}`;
+    ${showEdit ? '<div id="ct-edit" class="hidden"></div>' : ''}
+    ${d.can_transport_edit ? '<div id="ct-transport" class="hidden"></div>' : ''}
+    ${edits.length ? `<div id="ct-edits" class="hidden">${editsTable(edits, false)}</div>` : ''}`;
 
   const restore = $('#car-restore', b);
   if (restore) restore.onclick = () => confirmBox(`استرجاع ${c.plate}؟ تعود إلى القوائم بكل متابعاتها ودفعاتها.`, async () => {
@@ -932,13 +1014,14 @@ function renderCar(b, d) {
   $('#car-tabs', b).onclick = (e) => {
     const t = e.target.closest('button'); if (!t) return;
     $$('#car-tabs button', b).forEach((x) => x.classList.toggle('active', x === t));
-    ['follow', 'pay', 'charge', 'edit'].forEach((k) => $('#ct-' + k, b).classList.toggle('hidden', k !== t.dataset.ct));
+    // تبويبٌ قد لا يوجد (سيارة مُحالة بلا تعديل، أو بلا سجل) — لا يُسقط النافذة
+    ['follow', 'pay', 'charge', 'edit', 'edits', 'transport'].forEach((k) => $('#ct-' + k, b)?.classList.toggle('hidden', k !== t.dataset.ct));
   };
 
   /* ----- تبويب المتابعات ----- */
   const codes = S.consts.result_codes;
   $('#ct-follow', b).innerHTML = `
-    ${!ro && cap('followups.create') ? `<form id="fu-form" class="panel" style="background:#f8fafd">
+    ${canFollow ? `<form id="fu-form" class="panel" style="background:#f8fafd">
       <h3 style="margin-bottom:.6rem">تسجيل محاولة تواصل جديدة</h3>
       <div class="form-grid">
         <label>النتيجة
@@ -992,7 +1075,7 @@ function renderCar(b, d) {
 
   /* ----- تبويب الدفعات ----- */
   $('#ct-pay', b).innerHTML = `
-    ${!ro && c.remaining > 0 && cap('payments.create') ? `
+    ${canPay ? `
     <form id="pay-form" class="panel" style="background:#f8fafd">
       <h3 style="margin-bottom:.6rem">تسجيل دفعة (المتبقي ${num(c.remaining)})</h3>
       <div class="form-grid">
@@ -1003,7 +1086,7 @@ function renderCar(b, d) {
       </div>
       <label>ملاحظة<input name="note"></label>
       <button class="btn primary">تسجيل الدفعة</button>
-    </form>` : '<div class="alert ok">تم سداد كامل المبلغ على هذه السيارة.</div>'}
+    </form>` : c.remaining > 0 ? '' : '<div class="alert ok">تم سداد كامل المبلغ على هذه السيارة.</div>'}
     <div class="table-wrap"><table class="data">
       <thead><tr><th>التاريخ</th><th>المبلغ</th><th>الطريقة</th><th>المرجع</th><th>ملاحظة</th><th>سجّلها</th>${canDelPay ? '<th></th>' : ''}</tr></thead>
       <tbody>${d.payments.map((p) => `<tr>
@@ -1033,10 +1116,55 @@ function renderCar(b, d) {
   // ما كان الموظف يقرأه من برنامج آخر أثناء المكالمة، صار هنا أمامه
   if (cap('charges.view')) renderCharges(b, c, d.charges, ro);
 
+  /* ----- تبويب هيئة النقل -----
+     الخانات الثلاث يراها الجميع في بيانات السيارة أعلاه، ويعدّلها من يملك
+     صلاحية هيئة النقل من هنا. وكل تغيير في سجل التعديلات باسمه. */
+  const tr = $('#ct-transport', b);
+  if (tr) {
+    const ynSel = (name, v) => `<select name="${name}">
+      <option value="" ${v == null ? 'selected' : ''}>— لم تُحدَّد —</option>
+      <option value="1" ${v === 1 ? 'selected' : ''}>✓ صح</option>
+      <option value="0" ${v === 0 ? 'selected' : ''}>✗ خطأ</option></select>`;
+    tr.innerHTML = `<form id="tr-form" class="panel" style="background:#f8fafd">
+      <h3 style="margin-bottom:.6rem">بيانات هيئة النقل</h3>
+      <div class="form-grid">
+        <label>بطاقة التشغيل${ynSel('operating_card', T.operating_card)}</label>
+        <label>بطاقة السائق${ynSel('driver_card', T.driver_card)}</label>
+        <label>تفعيل GPS${ynSel('gps', T.gps)}</label>
+      </div>
+      ${T.updated_at ? `<p class="muted" style="margin:.4rem 0 0">آخر تعديل: ${esc(T.updated_by_name || '—')} · ${dt(T.updated_at)}</p>` : ''}
+      <button class="btn primary" style="margin-top:.6rem">حفظ</button>
+    </form>`;
+    $('#tr-form', b).onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = Object.fromEntries(new FormData(e.target));
+      const body = Object.fromEntries(Object.entries(fd).map(([k, v]) => [k, v === '' ? null : v === '1']));
+      try {
+        await api(`/cars/${c.id}/transport`, { method: 'PUT', body });
+        toast('حُفظت بيانات هيئة النقل — وسُجّلت باسمك', 'ok'); openCar(c.id);
+      } catch (ex) { toast(ex.message, 'bad'); }
+    };
+  }
+
   /* ----- تبويب التعديل ----- */
   const edit = $('#ct-edit', b);
-  if (!edit) return;                       // سيارة مُحالة: لا تبويب تعديل أصلاً
-  edit.innerHTML = carForm(c, cap('cars.edit')) + (cap('cars.delete')
+  if (!edit) return;                       // سيارة مُحالة، أو رئيسٌ بلا تعديل ولا نقل
+  if (H && !H.edit) {
+    // رئيسٌ يملك النقل وحده: قائمة موظفي قسمه، لا نموذج التعديل
+    edit.innerHTML = `<form id="move-form" class="panel">
+      <label>انقلها إلى موظفٍ من قسمك
+        <select name="assigned_to" required>${(H.members || []).filter((m) => m.id !== c.assigned_to)
+          .map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></label>
+      <div class="modal-actions"><button class="btn primary">نقل السيارة</button></div></form>`;
+    $('#move-form', b).onsubmit = async (e) => {
+      e.preventDefault();
+      try { await api(`/cars/${c.id}/move`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+        toast('نُقلت السيارة — وسُجّل النقل باسمك', 'ok'); closeModal(); loadCars(); }
+      catch (ex) { toast(ex.message, 'bad'); }
+    };
+    return;
+  }
+  edit.innerHTML = carForm(c, cap('cars.edit') || !!H?.edit, H?.assign ? H.members : null) + (cap('cars.delete')
     ? `<div class="modal-actions"><button class="btn danger" id="car-del">${
         d.follow_ups.length || d.payments.length || (d.charges || []).length
           ? 'أرشفة السيارة' : 'حذف السيارة نهائياً'}</button></div>` : '');
@@ -1430,7 +1558,7 @@ function bindPlateBoxes(root) {
 }
 
 /* ---------------- نموذج السيارة ---------------- */
-function carForm(c = {}, mgr = false) {
+function carForm(c = {}, mgr = false, members = null) {
   const v = (k, dflt = '') => esc(c[k] ?? dflt);
 
   // الموظف: بيانات التواصل فقط — بقية الحقول للعرض وللمدير التعديل
@@ -1460,6 +1588,8 @@ function carForm(c = {}, mgr = false) {
       ${cap('cars.assign') ? `<label>الموظف المسؤول<select name="assigned_to">
         <option value="">— غير مسندة —</option>
         ${S.employees.map((e) => `<option value="${e.id}" ${c.assigned_to === e.id ? 'selected' : ''}>${esc(e.name)} (${e.cars_count})</option>`).join('')}
+      </select></label>` : members ? `<label>الموظف المسؤول <small class="muted">(من قسمك)</small><select name="assigned_to">
+        ${members.map((e) => `<option value="${e.id}" ${c.assigned_to === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}
       </select></label>` : ''}
     </div>
     <label>ملاحظات<textarea name="notes">${v('notes')}</textarea></label>
@@ -1528,7 +1658,9 @@ async function loadUsers() {
     <td>${esc(u.name)}${u.archived_at ? `<br><small class="muted">أُرشف ${dt(u.archived_at)}${
       u.archived_by_name ? ' · ' + esc(u.archived_by_name) : ''}${u.archive_reason ? ' · ' + esc(u.archive_reason) : ''}</small>` : ''}</td>
     <td class="num">${esc(u.username)}</td>
-    <td><span class="badge ${u.role === 'manager' || u.role === 'supervisor' ? 'info' : ''}">${esc(roleLabel(u.role))}</span></td>
+    <td><span class="badge ${u.role === 'manager' || u.role === 'supervisor' ? 'info' : ''}">${esc(roleLabel(u.role))}</span>${
+      u.heads ? `<br><span class="badge warn">رئيس ${esc(u.heads)}</span>` : ''}${
+      u.department ? `<br><small class="muted">${esc(u.department)}</small>` : ''}</td>
     <td class="num">${esc(u.phone || '—')}</td>
     <td class="num">${u.max_cars ?? `<span class="muted">افتراضي (${esc(S.settings.default_max_cars || 30)})</span>`}</td>
     <td class="num"><b>${num(u.cars_count)}</b></td>
@@ -1559,6 +1691,70 @@ async function loadUsers() {
 }
 
 $('#btn-add-user').onclick = () => userForm(null);
+$('#btn-departments').onclick = () => departmentsModal();
+
+/* ---------------- الأقسام ----------------
+   قسمٌ له اسم ورئيس وموظفون. الموظف في قسمٍ واحد: من يُختار هنا يُنقل
+   إليه من قسمه السابق. ورئيس القسم يعمل على سيارات موظفيه بما تسمح به
+   صلاحيات «رئيس القسم» في شاشة الصلاحيات. */
+async function departmentsModal() {
+  let d;
+  try { d = await api('/departments'); } catch (e) { return toast(e.message, 'bad'); }
+  const personOpt = (sel) => d.people.map((p) =>
+    `<option value="${p.id}" ${Number(sel) === p.id ? 'selected' : ''}>${esc(p.name)} — ${esc(p.role_label)}</option>`).join('');
+  const deptName = (id) => d.departments.find((x) => x.id === id)?.name;
+  const b = openModal('الأقسام', `
+    <p class="muted">رئيس القسم يرى سيارات موظفي قسمه ويعمل عليها بما تحدده صلاحيات «رئيس القسم»
+      في شاشة الصلاحيات — وكل ما يغيّره يُسجَّل باسمه ويُنبَّه صاحب السيارة.</p>
+    ${d.departments.map((x) => `<div class="panel" data-dept="${x.id}">
+      <div class="form-grid">
+        <label>اسم القسم<input data-name value="${esc(x.name)}" maxlength="40"></label>
+        <label>رئيس القسم<select data-head><option value="">— بلا رئيس —</option>${personOpt(x.head_id)}</select></label>
+      </div>
+      <p style="margin:.6rem 0 .3rem"><b>موظفو القسم</b> <span class="muted">(${num(x.members.length)})</span></p>
+      <div class="row gap wrap">${d.people.map((p) => `<label class="check">
+        <input type="checkbox" data-member value="${p.id}" ${Number(p.department_id) === x.id ? 'checked' : ''}>
+        ${esc(p.name)}${p.department_id && Number(p.department_id) !== x.id
+          ? ` <small class="muted">(في «${esc(deptName(Number(p.department_id)) || '')}»)</small>` : ''}</label>`).join('')}</div>
+      <div class="modal-actions">
+        <button class="btn primary" data-save>حفظ القسم</button>
+        ${x.members.length ? '' : '<button class="btn danger" data-del>حذف القسم</button>'}
+      </div>
+    </div>`).join('') || '<p class="muted">لا توجد أقسام بعد.</p>'}
+    <form id="dept-new" class="row gap" style="margin-top:1rem">
+      <input name="name" placeholder="اسم قسم جديد — مثال: الخدمات المساندة" maxlength="40" required style="flex:1">
+      <button class="btn primary">+ إضافة قسم</button>
+    </form>`, 'wide');
+
+  $('#dept-new', b).onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('/departments', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      toast('أُضيف القسم — اختر رئيسه وموظفيه', 'ok'); departmentsModal(); }
+    catch (ex) { toast(ex.message, 'bad'); }
+  };
+  $$('[data-dept]', b).forEach((box) => {
+    const id = +box.dataset.dept;
+    box.querySelector('[data-save]').onclick = async () => {
+      const members = [...box.querySelectorAll('[data-member]:checked')].map((x) => +x.value);
+      const moving = members.filter((m) => { const p = d.people.find((q) => q.id === m); return p.department_id && Number(p.department_id) !== id; });
+      const go = async () => {
+        try {
+          await api('/departments/' + id, { method: 'PUT', body: {
+            name: box.querySelector('[data-name]').value, head_id: box.querySelector('[data-head]').value || null } });
+          await api(`/departments/${id}/members`, { method: 'PUT', body: { user_ids: members } });
+          toast('حُفظ القسم', 'ok'); departmentsModal(); loadUsers();
+        } catch (ex) { toast(ex.message, 'bad'); }
+      };
+      if (moving.length) confirmBox(`${moving.length === 1 ? 'موظفٌ مختار' : num(moving.length) + ' موظفين مختارون'} في قسمٍ آخر — سيُنقلون إلى هذا القسم. متابعة؟`, go, false);
+      else go();
+    };
+    const del = box.querySelector('[data-del]');
+    if (del) del.onclick = () => confirmBox('حذف هذا القسم؟ لا موظفين فيه.', async () => {
+      try { await api('/departments/' + id, { method: 'DELETE' }); toast('حُذف القسم', 'ok'); departmentsModal(); }
+      catch (ex) { toast(ex.message, 'bad'); }
+    });
+  });
+}
 
 /**
  * زملاء التواصل المعتمدون لموظف — يرسمها المدير وحده.
@@ -2074,6 +2270,91 @@ async function loadBatches() {
 /* ============================================================
    الإعدادات
    ============================================================ */
+/* ---------------- تقليب الصفحات ----------------
+   السجلات تكبر كل يوم: تُعرض صفحةً صفحة بعددٍ ثابت، ويُختار العدد مرة
+   ويُتذكَّر لكل سجل على هذا الجهاز. */
+const PAGE_SIZES = [25, 50, 100];
+function pageSize(key) {
+  let n = 25;
+  try { n = Number(localStorage.getItem('page-size:' + key)) || 25; } catch { /* تخزين محجوب */ }
+  return PAGE_SIZES.includes(n) ? n : 25;
+}
+
+/** شريط الصفحات: الأولى · السابقة · أرقام حول الحالية · التالية · الأخيرة، وعدد الأسطر. */
+function renderPager(host, { page, pages, total, key }, go) {
+  if (!host) return;
+  const size = pageSize(key);
+  // أرقامٌ حول الحالية لا كلّها — مئة صفحة لا تُعرض مئة زر
+  const nums = [];
+  for (let p = Math.max(1, page - 2); p <= Math.min(pages, page + 2); p++) nums.push(p);
+  const btn = (p, label, on = true) =>
+    `<button class="btn sm${p === page && label === String(p) ? ' primary' : ''}" data-go="${p}" ${on ? '' : 'disabled'}>${label}</button>`;
+  host.innerHTML = `<div class="row between wrap" style="margin-top:.6rem;gap:.5rem">
+    <div class="row gap wrap">
+      ${pages > 1 ? `${btn(1, 'الأولى', page > 1)}${btn(page - 1, '‹ السابقة', page > 1)}
+        ${nums[0] > 1 ? '<span class="muted">…</span>' : ''}
+        ${nums.map((p) => btn(p, String(p))).join('')}
+        ${nums[nums.length - 1] < pages ? '<span class="muted">…</span>' : ''}
+        ${btn(page + 1, 'التالية ›', page < pages)}${btn(pages, 'الأخيرة', page < pages)}` : ''}
+    </div>
+    <div class="row gap" style="align-items:center">
+      <span class="muted">صفحة ${num(page)} من ${num(pages)} · ${num(total)} سطراً</span>
+      <label class="inline">في الصفحة <select data-size>${PAGE_SIZES.map((n) =>
+        `<option ${n === size ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    </div>
+  </div>`;
+  host.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => go(Number(b.dataset.go)); });
+  host.querySelector('[data-size]').onchange = (e) => {
+    try { localStorage.setItem('page-size:' + key, e.target.value); } catch { /* يعمل بلا حفظ */ }
+    go(1);
+  };
+}
+
+/* ---------------- سجل النشاط ---------------- */
+async function loadAudit(page = 1) {
+  const body = $('#audit-body');
+  body.innerHTML = '<tr><td colspan="4" class="empty"><span class="spin"></span></td></tr>';
+  let a;
+  try { a = await api(`/reports/audit?page=${page}&limit=${pageSize('audit')}`); }
+  catch (e) { body.innerHTML = `<tr><td colspan="4" class="empty">${esc(e.message)}</td></tr>`; return; }
+  body.innerHTML = a.log.map((x) => `<tr>
+    <td>${dt(x.created_at)}</td><td>${esc(x.user_name || '—')}</td>
+    <td>${esc(x.action)}</td>
+    <td style="white-space:normal;max-width:420px" class="muted">${esc(x.details || '')}</td>
+  </tr>`).join('') || '<tr><td colspan="4" class="empty">لا يوجد نشاط</td></tr>';
+  renderPager($('#audit-pager'), { ...a, key: 'audit' }, loadAudit);
+}
+
+/* ---------------- سجل تعديلات السيارات ----------------
+   من يملك السجل يرى الكل، ورئيس القسم يرى قسمه. للقراءة وحدها. */
+let EDIT_PEOPLE_LOADED = false;
+async function loadEdits(page = 1) {
+  const box = $('#edits-box');
+  if (!box) return;
+  box.innerHTML = '<p><span class="spin"></span></p>';
+  const q = new URLSearchParams({ page, limit: pageSize('edits') });
+  const v = (id) => $(id).value;
+  if (v('#ed-q')) q.set('q', v('#ed-q'));
+  if (v('#ed-owner')) q.set('owner_id', v('#ed-owner'));
+  if (v('#ed-editor')) q.set('editor_id', v('#ed-editor'));
+  if ($('#ed-others').checked) q.set('others', '1');
+  if (v('#ed-from')) q.set('from', v('#ed-from'));
+  if (v('#ed-to')) q.set('to', v('#ed-to'));
+  let d;
+  try { d = await api('/departments/edits?' + q); }
+  catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+  if (!EDIT_PEOPLE_LOADED) {
+    const opts = d.people.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    $('#ed-owner').insertAdjacentHTML('beforeend', opts);
+    $('#ed-editor').insertAdjacentHTML('beforeend', opts);
+    ['#ed-q', '#ed-owner', '#ed-editor', '#ed-others', '#ed-from', '#ed-to'].forEach((id) => { $(id).onchange = () => loadEdits(); });
+    EDIT_PEOPLE_LOADED = true;
+  }
+  box.innerHTML = `<p class="muted">${d.scope === 'all' ? 'كل الأقسام' : 'قسمك'}</p>
+    ${editsTable(d.edits, true)}<div data-pager></div>`;
+  renderPager(box.querySelector('[data-pager]'), { ...d, key: 'edits' }, loadEdits);
+}
+
 async function loadSettings() {
   const r = await api('/settings');
   S.settings = r.settings;
@@ -2083,14 +2364,52 @@ async function loadSettings() {
   // كل لوحة تُحمَّل لصاحب صلاحيتها وحده — الشاشة تُفتح بأيٍّ منها
   if (cap('settings.manage')) loadDbStatus();
   if (cap('results.manage')) loadResults();
-  if (!cap('reports.audit')) return;
+  if (cap('cars.edit_log|dept.head')) loadEdits();
+  if (cap('reports.audit')) loadAudit();
+}
 
-  const a = await api('/reports/audit?limit=150').catch(() => ({ log: [] }));
-  $('#audit-body').innerHTML = a.log.map((x) => `<tr>
-    <td>${dt(x.created_at)}</td><td>${esc(x.user_name || '—')}</td>
-    <td>${esc(x.action)}</td>
-    <td style="white-space:normal;max-width:420px" class="muted">${esc(x.details || '')}</td>
-  </tr>`).join('') || '<tr><td colspan="4" class="empty">لا يوجد نشاط</td></tr>';
+/* ---------------- التراخيص ----------------
+   مكتبة ملفات PDF: يحمّلها كل موظف ولا يغيّرها، ويرفعها ويسمّيها ويحذفها
+   من يملك صلاحية «هيئة النقل — رفع التراخيص». */
+async function loadLicenses() {
+  const box = $('#licenses-box');
+  box.innerHTML = '<p><span class="spin"></span></p>';
+  let d;
+  try { d = await api('/licenses'); }
+  catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
+  box.innerHTML = `
+    ${d.can_manage ? `<form id="lic-form" class="panel">
+      <h3 style="margin-bottom:.6rem">رفع ترخيص</h3>
+      <div class="form-grid">
+        <label>اسم الترخيص *<input name="name" required maxlength="80" placeholder="ترخيص هيئة النقل ٢٠٢٦"></label>
+        <label>الملف (PDF — حتى ٤ ميجابايت) *<input type="file" name="file" accept="application/pdf" required></label>
+      </div>
+      <button class="btn primary">رفع</button>
+    </form>` : '<p class="muted">ملفات التراخيص للتحميل — لا تُعدَّل من هنا.</p>'}
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>الترخيص</th><th>الحجم</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead>
+      <tbody>${d.licenses.map((l) => `<tr>
+        <td><b>${esc(l.name)}</b></td>
+        <td class="num">${fileSize(l.size)}</td>
+        <td>${esc(l.created_by_name || '—')}</td>
+        <td>${dt(l.created_at)}</td>
+        <td class="row gap">
+          <a class="btn sm primary" href="/api/licenses/${l.id}" download>تحميل</a>
+          ${d.can_manage ? `<button class="btn sm danger" data-dellic="${l.id}">حذف</button>` : ''}
+        </td></tr>`).join('') || '<tr><td colspan="5" class="empty">لا توجد تراخيص مرفوعة</td></tr>'}</tbody>
+    </table></div>`;
+
+  const form = $('#lic-form');
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button'); btn.disabled = true;
+    try { await api('/licenses', { method: 'POST', body: new FormData(e.target) }); toast('رُفع الترخيص', 'ok'); loadLicenses(); }
+    catch (ex) { toast(ex.message, 'bad'); btn.disabled = false; }
+  };
+  $$('#licenses-box [data-dellic]').forEach((x) => { x.onclick = () => confirmBox('حذف هذا الترخيص؟ لن يستطيع الموظفون تحميله بعدها.', async () => {
+    try { await api('/licenses/' + x.dataset.dellic, { method: 'DELETE' }); toast('حُذف الترخيص', 'ok'); loadLicenses(); }
+    catch (ex) { toast(ex.message, 'bad'); }
+  }); });
 }
 
 function fileSize(bytes) {
