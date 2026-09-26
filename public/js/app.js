@@ -567,10 +567,10 @@ $('#bulk-refer').onclick = async () => {
 
   const b = openModal(`إحالة ${count} سيارة للتواصل`, `
     <form id="refer-form">
-      <label>ماذا تريدين أن يُقال للسائق؟
+      <label>ماذا تريد أن يُقال للسائق؟
         <textarea name="note" rows="3"
           placeholder="مثال: ذكّره بوعده يوم ١٥ واسأله متى يقدر يمر المكتب…"></textarea>
-        <small class="muted">تصل مع الطلب. اتركيها فارغة إن لم تكن هناك رسالة معيّنة.</small>
+        <small class="muted">تصل مع الطلب. اتركها فارغة إن لم تكن هناك رسالة معيّنة.</small>
       </label>
       <div class="modal-actions"><button class="btn primary">أرسل الطلب</button></div>
     </form>`, 'narrow');
@@ -623,7 +623,7 @@ async function loadReferralsOut() {
 
   box.innerHTML = `
     ${d.waiting_review ? `<div class="alert warn" style="margin-bottom:.8rem">
-      <b>وصلتك ${num(d.waiting_review)} نتيجة.</b> راجعيها واعتمديها لتُسجَّل المتابعة
+      <b>وصلتك ${num(d.waiting_review)} نتيجة.</b> راجعها واعتمدها لتُسجَّل المتابعة
       وتتحرك السيارة.</div>` : ''}
     <div class="table-wrap"><table class="data">
       <thead><tr>
@@ -665,7 +665,7 @@ function refOutRow(r) {
     <td>${r.replied_at ? dt(r.replied_at) : dt(r.created_at)}</td>
     <td>
       ${r.status === 'وصلت النتيجة'
-        ? `<button class="btn sm primary" data-approve="${r.id}">اعتمدي وسجّلي</button>`
+        ? `<button class="btn sm primary" data-approve="${r.id}">اعتمد وسجّل</button>`
         : ''}
       ${r.status === 'مُرسَل' || r.status === 'مفتوح'
         ? `<button class="link" data-cancel="${r.id}">إلغاء</button>` : ''}
@@ -706,9 +706,9 @@ function approveReferral(r) {
       </div>
       <label>التفاصيل / السبب
         <textarea name="result_note" rows="3">${esc(r.reply_note || '')}</textarea>
-        <small class="muted">عدّلي ما شئتِ قبل الحفظ — ما يُحفظ هو ما تكتبينه أنتِ.</small>
+        <small class="muted">عدّل ما شئت قبل الحفظ — ما يُحفظ هو ما تكتبه أنت.</small>
       </label>
-      <div class="modal-actions"><button class="btn primary">اعتمدي وسجّلي المتابعة</button></div>
+      <div class="modal-actions"><button class="btn primary">اعتمد وسجّل المتابعة</button></div>
     </form>`);
 
   $('#approve-form', b).onsubmit = async (e) => {
@@ -832,7 +832,7 @@ function replyForm(r) {
     e.preventDefault();
     try {
       await api(`/referrals/${r.id}/reply`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
-      toast('وصلت النتيجة لصاحبة الملف', 'ok');
+      toast('وصلت النتيجة لصاحب الملف', 'ok');
       closeModal();
       loadReferralsIn();
     } catch (ex) { toast(ex.message, 'bad'); }
@@ -845,7 +845,7 @@ function declineForm(r) {
     <form id="decline-form">
       <label>السبب
         <input name="reason" placeholder="مثال: الرقم لا يرد منذ يومين" maxlength="200">
-        <small class="muted">يصل السبب لصاحبة الملف، فتعرف ما تفعل بدل أن تنتظر.</small>
+        <small class="muted">يصل السبب لصاحب الملف، فيعرف ما يفعل بدل أن ينتظر.</small>
       </label>
       <div class="modal-actions"><button class="btn danger">أعتذر عن هذا الطلب</button></div>
     </form>`, 'narrow');
@@ -890,7 +890,7 @@ function renderCar(b, d) {
       ${cap('cars.delete') ? '<div style="margin-top:.5rem"><button class="btn sm primary" id="car-restore">استرجاع السيارة</button></div>' : ''}
     </div>` : ro ? `<div class="alert info" style="margin-bottom:.8rem">
       <b>سيارة أُحيلت إليك للتواصل.</b> اقرأ ما تحتاجه قبل الاتصال، ثم أرسل النتيجة
-      من قائمة «بالنيابة». لا تُعدَّل بياناتها من هنا — صاحبة الملف هي من تعدّل.
+      من قائمة «بالنيابة». لا تُعدَّل بياناتها من هنا — صاحب الملف هو من يعدّل.
     </div>` : ''}
     <div class="detail-grid">
       ${dcell('نوع السيارة', esc(c.car_type))}
@@ -1822,7 +1822,7 @@ async function loadReferralWatch() {
         <b>${num(d.stale.length)} نتيجة وصلت ولم تُعتمد</b> منذ أكثر من ${arabicSpan(d.hours)}.
       </div>
       <div class="table-wrap"><table class="data">
-        <thead><tr><th>اللوحة</th><th>صاحبة الملف</th><th>من اتصل</th><th>وصلت النتيجة</th><th>منذ</th></tr></thead>
+        <thead><tr><th>اللوحة</th><th>صاحب الملف</th><th>من اتصل</th><th>وصلت النتيجة</th><th>منذ</th></tr></thead>
         <tbody>${d.stale.map((r) => `<tr>
           <td><span class="plate">${esc(r.plate)}</span></td>
           <td>${esc(r.owner_name)}</td>

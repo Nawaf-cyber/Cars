@@ -222,7 +222,7 @@ router.delete('/:id', P.needs('referrals.request'), async (req, res) => {
   if (!OPEN.includes(r.status)) return res.status(400).json({ error: 'الطلب منتهٍ أصلاً' });
 
   await db.prepare(
-    "UPDATE referrals SET status='ملغى', closed_at=?, closed_by=?, close_reason='ألغته صاحبة الملف' WHERE id=?")
+    "UPDATE referrals SET status='ملغى', closed_at=?, closed_by=?, close_reason='ألغاه صاحب الملف' WHERE id=?")
     .run(U.now(), req.user.id, r.id);
   A.audit(req.user.id, 'إلغاء إحالة', 'cars', r.car_id, null);
   res.json({ ok: true });

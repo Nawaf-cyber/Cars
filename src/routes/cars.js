@@ -511,7 +511,7 @@ router.post('/:id/follow-ups', P.needs('followups.create'), async (req, res) => 
   if (ref) {
     await db.prepare(`
       UPDATE referrals SET status='مُعتمد', follow_up_id=?, closed_at=?, closed_by=?,
-             close_reason='اعتمدتها صاحبة الملف' WHERE id=?`)
+             close_reason='اعتمدها صاحب الملف' WHERE id=?`)
       .run(Number(info.lastInsertRowid), U.now(), req.user.id, ref.id);
   }
 

@@ -259,6 +259,20 @@ function money(n) {
   return Number(toNumber(n).toFixed(2));
 }
 
+/**
+ * اسم الملف المرفوع كما كتبه صاحبه.
+ *
+ * مكتبة الرفع تقرأ الاسم بترميز لاتيني، فيصل «تحصيل.xlsx» رموزاً مثل
+ * «ØªØ­ØµÙÙ.xlsx». اسمٌ كل حروفه دون ٢٥٦ وفيه ما فوق ١٢٧ هو بايتات UTF-8
+ * قُرئت خطأً — نعيد قراءتها. وإن لم تصلح القراءة (اسم لاتيني حقيقي) يبقى كما هو.
+ */
+function uploadName(raw, max = 120) {
+  const s = String(raw || 'file');
+  if (!/[\u0080-ÿ]/.test(s) || /[^\u0000-ÿ]/.test(s)) return s.slice(0, max);
+  const fixed = Buffer.from(s, 'latin1').toString('utf8');
+  return (fixed.includes('�') ? s : fixed).slice(0, max);
+}
+
 module.exports = {
   toEnglishDigits, normalizePlate, formatPlate, parsePlate, normalizeLetters,
   PLATE_LETTERS, normalizePhone, toNumber, money,
@@ -266,5 +280,5 @@ module.exports = {
   RESULT_CODES, RESULT_MAP, FALLBACK_RESULT,
   CAR_TYPES, CAR_STATUSES, PAY_METHODS, CHANNELS,
   CHARGE_KINDS, CHARGE_STATUSES, CAR_STATES,
-  today, now, hoursAgo, isValidDate, parseDate,
+  today, now, hoursAgo, isValidDate, parseDate, uploadName,
 };

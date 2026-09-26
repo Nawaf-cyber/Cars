@@ -36,14 +36,8 @@ const MAX_FILE = 3 * 1024 * 1024;
 const MIME_OK = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE, files: 3 } });
 
-/* مكتبة الرفع تقرأ اسم الملف بترميز لاتيني، فيصل «تقرير.png» رموزاً.
-   الاسم الذي كل حروفه دون ٢٥٦ هو بايتات UTF-8 قُرئت خطأً — نعيد قراءتها. */
-function fileName(raw) {
-  const s = String(raw || 'file');
-  if (/[^\u0000-ÿ]/.test(s)) return s.slice(0, 120);
-  const fixed = Buffer.from(s, 'latin1').toString('utf8');
-  return (fixed.includes('�') ? s : fixed).slice(0, 120);
-}
+// اسم الملف كما كتبه صاحبه — مكتبة الرفع تقرؤه بترميز لاتيني فيصل رموزاً
+const fileName = (raw) => U.uploadName(raw);
 
 router.use(M.featureGate('requests'));
 

@@ -219,7 +219,7 @@ router.post('/preview', P.needs('cars.import'), upload.single('file'), async (re
        من كتابته ويقول التنفيذُ "انتهت صلاحية الملف" فور رفعه. */
     await db.prepare(
       'INSERT INTO import_staging (token, filename, sheet, rows_json, user_id, created_at) VALUES (?,?,?,?,?,?)'
-    ).run(token, String(req.file.originalname || 'file.xlsx'), sheetName,
+    ).run(token, U.uploadName(req.file.originalname || 'file.xlsx'), sheetName,
           JSON.stringify(rows), req.user.id, U.now());
     fs.rmSync(req.file.path, { force: true });
 
@@ -229,7 +229,7 @@ router.post('/preview', P.needs('cars.import'), upload.single('file'), async (re
 
     res.json({
       token,
-      filename: req.file.originalname,
+      filename: U.uploadName(req.file.originalname),
       sheets: wb.SheetNames,
       sheet: sheetName,
       header_row: headerIdx,
@@ -327,7 +327,7 @@ router.post('/commit', P.needs('cars.import'), async (req, res) => {
 
   const batchInfo = (await db.prepare(
     'INSERT INTO import_batches (filename, rows_total, created_by, created_at) VALUES (?,?,?,?)')
-    .run(String(b.filename || found), dataRows.length, req.user.id, U.now()));
+    .run(U.uploadName(b.filename || staged.filename || 'file.xlsx'), dataRows.length, req.user.id, U.now()));
   const batchId = Number(batchInfo.lastInsertRowid);
 
 
