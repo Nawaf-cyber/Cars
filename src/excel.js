@@ -25,6 +25,9 @@ const COLUMNS = [
   { header: 'اسم السائق',  key: 'driver',  width: 20, align: 'right' },
   { header: 'رقم التواصل', key: 'phone',   width: 15, align: 'center' },
   { header: 'المبلغ',      key: 'amount',  width: 14, align: 'center', money: true },
+  // بعد المبلغ مباشرة: ما بقي، وما سُدّد — يقرؤهما المحصّل قبل أن يتصل
+  { header: 'المتبقي',          key: 'remaining', width: 14, align: 'center', money: true },
+  { header: 'إجمالي السدادات',  key: 'paid',      width: 15, align: 'center', money: true },
   { header: 'النتيجة',     key: 'result',  width: 55, align: 'right' },
 ];
 
@@ -80,6 +83,10 @@ function addSheet(wb, employeeName, rows) {
       r.driver || 'لا يوجد',
       r.phone || 'لا يوجد',
       r.amount === null || r.amount === undefined ? 'لا يوجد' : Number(r.amount),
+      // بلا مبلغٍ مسجّل لا يُعرف المتبقي — «لا يوجد» لا صفر يوحي بأنها سُدّدت
+      r.amount === null || r.amount === undefined ? 'لا يوجد'
+        : Math.round((Number(r.amount) - Number(r.paid || 0)) * 100) / 100,
+      Number(r.paid || 0),
       r.result || '',
     ]);
     const bg = needsAttention(r) ? ORANGE : GREEN_LIGHT;

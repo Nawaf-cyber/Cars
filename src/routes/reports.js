@@ -199,6 +199,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
 
   const rows = (await db.prepare(`
     SELECT c.plate, c.car_type, c.driver_name, c.driver_phone, c.total_amount,
+           IFNULL(p.paid, 0) AS paid,
            u.name AS emp_name,
            IFNULL(f.cnt, 0) AS contacts,
            (SELECT result_note FROM follow_ups WHERE car_id=c.id AND result_note IS NOT NULL
@@ -207,6 +208,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
     FROM cars c
     LEFT JOIN users u ON u.id = c.assigned_to
     LEFT JOIN (SELECT car_id, COUNT(*) cnt FROM follow_ups GROUP BY car_id) f ON f.car_id = c.id
+    LEFT JOIN (SELECT car_id, SUM(amount) paid FROM payments GROUP BY car_id) p ON p.car_id = c.id
     WHERE ${scope}
     ORDER BY u.name, c.plate`).all());
 
@@ -221,6 +223,7 @@ router.get('/export/cars', P.needs('reports.export'), async (req, res) => {
       driver: r.driver_name,
       phone: r.driver_phone,
       amount: r.total_amount,
+      paid: U.money(r.paid),
       contacted: r.contacts > 0,
       result: U.resultText(r.code, r.note, fallback),
     });
