@@ -2382,7 +2382,8 @@ function renderRolesPanel() {
   });
 
   const add = $('#role-add');
-  if (add) add.onclick = roleForm;
+  // لا تُمرَّر roleForm مباشرة: حدث الضغط يصلها كأنه «دور قائم» فتفتح نافذة إعادة تسمية لدور لا وجود له
+  if (add) add.onclick = () => roleForm();
 }
 
 /* ----- مفاتيح الدور المعروض ----- */
