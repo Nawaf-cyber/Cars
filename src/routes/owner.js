@@ -78,33 +78,51 @@ router.get('/features', async (req, res) => {
 });
 
 /* ---------- الأقسام المخفية ----------
-   مفتاحٌ واحد لكل قسم. المطفأ لا يعمل لأحد في الشركة ولا يظهر ولا يُذكر
-   اسمه، مهما حمل المدير من قدراته. والمشغَّل يظهر فوراً لمن مُنح قدراته —
-   والمدير مُنحها مسبقاً، فيجده جاهزاً يوم الكشف. */
+   مفتاحٌ لكل ميزة. المطفأة لا تعمل لأحد في الشركة ولا تظهر ولا يُذكر
+   اسمها، مهما حمل المدير من قدراتها. والمشغَّلة تظهر فوراً لمن مُنح
+   قدراتها — والمدير مُنحها مسبقاً، فيجدها جاهزة يوم الكشف.
+   والتابعة (عُهدتي، معالجة الطلبات) لا تُحفظ مكشوفةً وأمّها مخفية. */
 router.get('/modules', async (req, res) => {
   const P = require('../permissions');
+  const on = new Set(P.enabledFeatures());
   res.json({
     modules: Object.entries(P.MODULES).map(([key, label]) => ({
       key, label, enabled: P.moduleEnabled(key),
-      caps: P.CAPABILITIES.filter((c) => c.module === key).map((c) => ({ key: c.key, label: c.label })),
+      features: Object.entries(P.FEATURES).filter(([, f]) => f.module === key).map(([fk, f]) => ({
+        key: fk, label: f.label, enabled: on.has(fk),
+        parent: f.parent || null, parent_label: f.parent ? P.FEATURES[f.parent].label : null,
+        caps: P.CAPABILITIES.filter((c) => c.feature === fk).map((c) => ({ key: c.key, label: c.label })),
+      })),
     })),
   });
 });
 
 router.put('/modules', async (req, res) => {
   const P = require('../permissions');
-  const wanted = (Array.isArray(req.body?.enabled) ? req.body.enabled : [])
-    .map((s) => String(s).trim()).filter((k) => P.MODULES[k]);
-  const before = Object.keys(P.MODULES).filter((k) => P.moduleEnabled(k));
+  const asked = new Set();
+  for (const k of (Array.isArray(req.body?.enabled) ? req.body.enabled : []).map((s) => String(s).trim())) {
+    if (P.FEATURES[k]) asked.add(k);
+    else if (P.MODULES[k])   // القسم كله
+      for (const [fk, f] of Object.entries(P.FEATURES)) if (f.module === k) asked.add(fk);
+  }
+  // التابعة بلا أمّها لا تعمل — فلا تُحفظ، ولا يظنّ المالك أنه كشفها
+  const keep = (fk) => asked.has(fk) && (!P.FEATURES[fk].parent || keep(P.FEATURES[fk].parent));
+  const wanted = Object.keys(P.FEATURES).filter(keep);
+  const orphans = [...asked].filter((fk) => !wanted.includes(fk));
+  if (orphans.length)
+    return res.status(400).json({ error: orphans.map((fk) =>
+      `«${P.FEATURES[fk].label}» لا تُكشف بلا «${P.FEATURES[P.FEATURES[fk].parent].label}»`).join(' · ') });
 
-  await require('../settings').setSetting('modules_enabled', [...new Set(wanted)].join(','));
+  const before = P.enabledFeatures();
+  await require('../settings').setSetting('modules_enabled', wanted.join(','));
 
-  const shown = wanted.filter((k) => !before.includes(k)).map((k) => P.MODULES[k]);
-  const hidden = before.filter((k) => !wanted.includes(k)).map((k) => P.MODULES[k]);
+  const name = (fk) => `${P.MODULES[P.FEATURES[fk].module]}: ${P.FEATURES[fk].label}`;
+  const shown = wanted.filter((k) => !before.includes(k)).map(name);
+  const hidden = before.filter((k) => !wanted.includes(k)).map(name);
   A.audit(req.user.id, 'الأقسام المخفية', 'settings', null,
     { كُشف: shown.join('، ') || '—', أُخفي: hidden.join('، ') || '—' });
 
-  res.json({ ok: true, enabled: Object.keys(P.MODULES).filter((k) => P.moduleEnabled(k)) });
+  res.json({ ok: true, enabled: P.enabledFeatures() });
 });
 
 // ---------- إيقاف / تشغيل فوري ----------

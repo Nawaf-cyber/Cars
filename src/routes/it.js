@@ -22,18 +22,19 @@ const TICKET_CATS = ['جهاز', 'حساب ودخول', 'شبكة وإنترنت
 const TICKET_STATUSES = ['جديد', 'قيد العمل', 'بانتظار صاحب الطلب', 'مُغلق'];
 const PRIORITIES = ['عادي', 'عاجل'];
 
-router.use(M.moduleGate('it'));
+router.use(M.featureGate('assets', 'mine', 'subs', 'tickets', 'helpdesk'));
+
+const IT_CAPS = Object.keys(P.FEATURE_OF).filter((c) => P.MODULE_OF[c] === 'it');
 
 // الثوابت والأشخاص — لمن يرى القسم بأي وجه
-router.get('/meta', M.needsAny('it.view', 'it.self'), async (req, res) => {
-  const full = P.can(req.user, 'it.view');
+router.get('/meta', M.needsAny(...IT_CAPS), async (req, res) => {
+  /* قائمة الموظفين لمن يسلّم العُهد أو يُسند الطلبات أو يختار مسؤول اشتراك —
+     صاحب الطلب لا يحتاجها */
+  const staff = ['it.assets.view', 'it.subs.manage', 'it.helpdesk.manage'].some((c) => P.can(req.user, c));
   res.json({
     asset_kinds: ASSET_KINDS, asset_statuses: ASSET_STATUSES,
     ticket_categories: TICKET_CATS, ticket_statuses: TICKET_STATUSES, priorities: PRIORITIES,
-    // قائمة الموظفين لمن يدير القسم فقط — صاحب الطلب لا يحتاجها
-    people: full ? await M.people() : [],
-    can_manage: P.can(req.user, 'it.manage'),
-    can_view: full,
+    people: staff ? await M.people() : [],
   });
 });
 
@@ -48,7 +49,7 @@ const ASSET_SELECT = `
   LEFT JOIN users h ON h.id = a.holder_id
   LEFT JOIN cars  c ON c.id = a.car_id`;
 
-router.get('/assets', M.needsAny('it.view'), async (req, res) => {
+router.get('/assets', M.needsAny('it.assets.view'), async (req, res) => {
   const where = [], args = [];
   if (req.query.status) { where.push('a.status=?'); args.push(String(req.query.status)); }
   if (req.query.holder_id) { where.push('a.holder_id=?'); args.push(parseInt(req.query.holder_id, 10)); }
@@ -57,7 +58,7 @@ router.get('/assets', M.needsAny('it.view'), async (req, res) => {
   res.json({ assets: rows.map((r) => ({ ...r, moves: Number(r.moves) })) });
 });
 
-router.get('/assets/:id', M.needsAny('it.view'), async (req, res) => {
+router.get('/assets/:id', M.needsAny('it.assets.view'), async (req, res) => {
   const a = await db.prepare(`${ASSET_SELECT} WHERE a.id=?`).get(parseInt(req.params.id, 10));
   if (!a) return res.status(404).json({ error: 'الجهاز غير موجود' });
   const moves = await db.prepare(`
@@ -82,7 +83,7 @@ function readAsset(b) {
   };
 }
 
-router.post('/assets', M.needsAny('it.manage'), async (req, res) => {
+router.post('/assets', M.needsAny('it.assets.manage'), async (req, res) => {
   const a = readAsset(req.body || {});
   if (a.error) return res.status(400).json({ error: a.error });
   if (a.car_id && !(await db.prepare('SELECT 1 FROM cars WHERE id=?').get(a.car_id)))
@@ -101,7 +102,7 @@ router.post('/assets', M.needsAny('it.manage'), async (req, res) => {
   res.status(201).json({ ok: true, id });
 });
 
-router.put('/assets/:id', M.needsAny('it.manage'), async (req, res) => {
+router.put('/assets/:id', M.needsAny('it.assets.manage'), async (req, res) => {
   const cur = await db.prepare('SELECT * FROM assets WHERE id=?').get(parseInt(req.params.id, 10));
   if (!cur) return res.status(404).json({ error: 'الجهاز غير موجود' });
   const a = readAsset({ ...cur, ...(req.body || {}) });
@@ -129,7 +130,7 @@ const MOVES = {
   'استبعاد':          { from: ['في المخزن', 'تالفة', 'مفقودة'], to: 'مستبعدة' },
 };
 
-router.post('/assets/:id/move', M.needsAny('it.manage'), async (req, res) => {
+router.post('/assets/:id/move', M.needsAny('it.assets.manage'), async (req, res) => {
   const a = await db.prepare('SELECT * FROM assets WHERE id=?').get(parseInt(req.params.id, 10));
   if (!a) return res.status(404).json({ error: 'الجهاز غير موجود' });
 
@@ -164,7 +165,7 @@ router.post('/assets/:id/move', M.needsAny('it.manage'), async (req, res) => {
 });
 
 // الحذف لخطأ الإدخال وحده: جهازٌ سُلِّم مرةً له تاريخ لا يُمحى — يُستبعد
-router.delete('/assets/:id', M.needsAny('it.manage'), async (req, res) => {
+router.delete('/assets/:id', M.needsAny('it.assets.manage'), async (req, res) => {
   const a = await db.prepare('SELECT * FROM assets WHERE id=?').get(parseInt(req.params.id, 10));
   if (!a) return res.status(404).json({ error: 'الجهاز غير موجود' });
   const moved = Number((await db.prepare(
@@ -179,20 +180,24 @@ router.delete('/assets/:id', M.needsAny('it.manage'), async (req, res) => {
 /* =============================================================================
    ما يخصّني — لكل موظف: عهدتي وطلباتي
    ============================================================================= */
-router.get('/mine', M.needsAny('it.self', 'it.view'), async (req, res) => {
-  const assets = await db.prepare(`${ASSET_SELECT} WHERE a.holder_id=? ORDER BY a.label`).all(req.user.id);
-  const tickets = await db.prepare(`
+/* ما يخصّني: ميزتان في شاشة واحدة، ولكلٍّ صلاحيتها. من له الطلبات وحدها
+   لا يصله شيء عن العُهد، ومن له عهدته وحدها لا يرى طلبات. */
+router.get('/mine', M.needsAny('it.mine', 'it.tickets.raise'), async (req, res) => {
+  const assets = P.can(req.user, 'it.mine')
+    ? await db.prepare(`${ASSET_SELECT} WHERE a.holder_id=? ORDER BY a.label`).all(req.user.id) : [];
+  const tickets = !P.can(req.user, 'it.tickets.raise') ? [] : await db.prepare(`
     SELECT t.*, s.name AS assignee_name,
            (SELECT COUNT(*) FROM ticket_notes n WHERE n.ticket_id=t.id) AS notes
     FROM tickets t LEFT JOIN users s ON s.id=t.assignee_id
     WHERE t.requester_id=? ORDER BY CASE t.status WHEN 'مُغلق' THEN 1 ELSE 0 END, t.id DESC`).all(req.user.id);
-  res.json({ assets, tickets });
+  res.json({ assets, tickets,
+    has_assets: P.can(req.user, 'it.mine'), has_tickets: P.can(req.user, 'it.tickets.raise') });
 });
 
 /* =============================================================================
    الاشتراكات — تاريخ التجديد في محرّك التواريخ
    ============================================================================= */
-router.get('/subscriptions', M.needsAny('it.view'), async (req, res) => {
+router.get('/subscriptions', M.needsAny('it.subs.view'), async (req, res) => {
   const rows = await db.prepare(`
     SELECT s.*, r.name AS responsible_name,
       (SELECT d.expires_at FROM documents d WHERE d.entity_kind='subscription' AND d.entity_id=s.id
@@ -227,7 +232,7 @@ function readSub(b) {
   };
 }
 
-router.post('/subscriptions', M.needsAny('it.manage'), async (req, res) => {
+router.post('/subscriptions', M.needsAny('it.subs.manage'), async (req, res) => {
   const s = readSub(req.body || {});
   if (s.error) return res.status(400).json({ error: s.error });
   const info = await db.prepare(`INSERT INTO subscriptions (name, vendor, cost, cycle, account, responsible_id, active, note, created_by, created_at)
@@ -237,7 +242,7 @@ router.post('/subscriptions', M.needsAny('it.manage'), async (req, res) => {
   res.status(201).json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 
-router.put('/subscriptions/:id', M.needsAny('it.manage'), async (req, res) => {
+router.put('/subscriptions/:id', M.needsAny('it.subs.manage'), async (req, res) => {
   const cur = await db.prepare('SELECT * FROM subscriptions WHERE id=?').get(parseInt(req.params.id, 10));
   if (!cur) return res.status(404).json({ error: 'الاشتراك غير موجود' });
   const s = readSub({ ...cur, ...(req.body || {}) });
@@ -266,12 +271,12 @@ async function ticketFor(req, res) {
     LEFT JOIN assets a ON a.id=t.asset_id
     WHERE t.id=?`).get(parseInt(req.params.id, 10));
   if (!t) { res.status(404).json({ error: 'الطلب غير موجود' }); return null; }
-  const mine = Number(t.requester_id) === req.user.id;
-  if (!mine && !P.can(req.user, 'it.view')) { res.status(404).json({ error: 'الطلب غير موجود' }); return null; }
+  const mine = Number(t.requester_id) === req.user.id && P.can(req.user, 'it.tickets.raise');
+  if (!mine && !P.can(req.user, 'it.helpdesk.view')) { res.status(404).json({ error: 'الطلب غير موجود' }); return null; }
   return t;
 }
 
-router.get('/tickets', M.needsAny('it.view'), async (req, res) => {
+router.get('/tickets', M.needsAny('it.helpdesk.view'), async (req, res) => {
   const where = [], args = [];
   const st = String(req.query.status || 'open');
   if (st === 'open') where.push("t.status<>'مُغلق'");
@@ -286,18 +291,21 @@ router.get('/tickets', M.needsAny('it.view'), async (req, res) => {
   res.json({ tickets: rows });
 });
 
-router.post('/tickets', M.needsAny('it.self', 'it.manage'), async (req, res) => {
+router.post('/tickets', M.needsAny('it.tickets.raise', 'it.helpdesk.manage'), async (req, res) => {
   const b = req.body || {};
   const title = String(b.title || '').trim();
   if (title.length < 3 || title.length > 120) return res.status(400).json({ error: 'اكتب عنواناً للطلب' });
   const category = TICKET_CATS.includes(b.category) ? b.category : 'أخرى';
   const priority = PRIORITIES.includes(b.priority) ? b.priority : 'عادي';
 
-  // الجهاز المذكور يجب أن يكون بيده هو — إلا لمن يدير القسم
+  /* الجهاز المذكور يجب أن يكون بيده هو — إلا لمن يدير العُهد. ومن لا يرى
+     عهدته أصلاً (العُهد مخفية أو لم تُمنح له) لا يربط طلبه بجهاز. */
+  const assetsManager = P.can(req.user, 'it.assets.manage');
   let assetId = b.asset_id ? parseInt(b.asset_id, 10) : null;
+  if (assetId && !assetsManager && !P.can(req.user, 'it.mine')) assetId = null;
   if (assetId) {
     const a = await db.prepare('SELECT holder_id FROM assets WHERE id=?').get(assetId);
-    if (!a || (Number(a.holder_id) !== req.user.id && !P.can(req.user, 'it.manage'))) assetId = null;
+    if (!a || (Number(a.holder_id) !== req.user.id && !assetsManager)) assetId = null;
   }
 
   const now = U.now();
@@ -308,20 +316,20 @@ router.post('/tickets', M.needsAny('it.self', 'it.manage'), async (req, res) => 
   res.status(201).json({ ok: true, id: Number(info.lastInsertRowid) });
 });
 
-router.get('/tickets/:id', M.needsAny('it.self', 'it.view'), async (req, res) => {
+router.get('/tickets/:id', M.needsAny('it.tickets.raise', 'it.helpdesk.view'), async (req, res) => {
   const t = await ticketFor(req, res);
   if (!t) return;
   const notes = await db.prepare(`
     SELECT n.*, u.name AS user_name FROM ticket_notes n LEFT JOIN users u ON u.id=n.user_id
     WHERE n.ticket_id=? ORDER BY n.id`).all(t.id);
-  res.json({ ticket: t, notes, can_manage: P.can(req.user, 'it.manage') });
+  res.json({ ticket: t, notes, can_manage: P.can(req.user, 'it.helpdesk.manage') });
 });
 
-router.post('/tickets/:id/notes', M.needsAny('it.self', 'it.manage'), async (req, res) => {
+router.post('/tickets/:id/notes', M.needsAny('it.tickets.raise', 'it.helpdesk.manage'), async (req, res) => {
   const t = await ticketFor(req, res);
   if (!t) return;
   const mine = Number(t.requester_id) === req.user.id;
-  if (!mine && !P.can(req.user, 'it.manage')) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!mine && !P.can(req.user, 'it.helpdesk.manage')) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
   if (t.status === 'مُغلق') return res.status(400).json({ error: 'الطلب مغلق' });
 
   const body = String(req.body?.body || '').trim();
@@ -344,11 +352,11 @@ router.post('/tickets/:id/notes', M.needsAny('it.self', 'it.manage'), async (req
   res.status(201).json({ ok: true });
 });
 
-router.put('/tickets/:id', M.needsAny('it.self', 'it.manage'), async (req, res) => {
+router.put('/tickets/:id', M.needsAny('it.tickets.raise', 'it.helpdesk.manage'), async (req, res) => {
   const t = await ticketFor(req, res);
   if (!t) return;
   const b = req.body || {};
-  const manage = P.can(req.user, 'it.manage');
+  const manage = P.can(req.user, 'it.helpdesk.manage');
   const mine = Number(t.requester_id) === req.user.id;
 
   // صاحب الطلب يُغلقه وحسب — حين يُحلّ عنده قبل أن يصله أحد
@@ -380,15 +388,16 @@ router.put('/tickets/:id', M.needsAny('it.self', 'it.manage'), async (req, res) 
 });
 
 /** خلاصة لشريط التنبيه — عدٌّ رخيص. */
-router.get('/summary', M.needsAny('it.self', 'it.view'), async (req, res) => {
+router.get('/summary', M.needsAny('it.tickets.raise', 'it.helpdesk.view'), async (req, res) => {
   const out = {};
-  if (P.can(req.user, 'it.view')) {
+  if (P.can(req.user, 'it.helpdesk.view')) {
     out.new_tickets = Number((await db.prepare("SELECT COUNT(*) n FROM tickets WHERE status='جديد'").get()).n);
     out.urgent_open = Number((await db.prepare(
       "SELECT COUNT(*) n FROM tickets WHERE priority='عاجل' AND status<>'مُغلق'").get()).n);
   }
-  out.my_waiting = Number((await db.prepare(
-    "SELECT COUNT(*) n FROM tickets WHERE requester_id=? AND status='بانتظار صاحب الطلب'").get(req.user.id)).n);
+  if (P.can(req.user, 'it.tickets.raise'))
+    out.my_waiting = Number((await db.prepare(
+      "SELECT COUNT(*) n FROM tickets WHERE requester_id=? AND status='بانتظار صاحب الطلب'").get(req.user.id)).n);
   res.json(out);
 });
 

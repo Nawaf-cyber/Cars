@@ -23,19 +23,43 @@ const router = express.Router();
    على «أبشر أعمال» هو نفسه من يجدّد الاستمارة: الشؤون الحكومية. فالقسم
    الذي يتابع التواريخ الحكومية يتابعها كلها. */
 const KINDS = {
-  employee:     { mod: 'hr', view: 'hr.view', manage: 'hr.manage', label: 'موظف',  pick: 'اختر الموظف' },
-  car:          { mod: 'hr', view: 'hr.view', manage: 'hr.manage', label: 'سيارة', pick: 'اختر السيارة' },
-  asset:        { mod: 'it', view: 'it.view', manage: 'it.manage', label: 'جهاز',  pick: 'اختر الجهاز' },
-  subscription: { mod: 'it', view: 'it.view', manage: 'it.manage', label: 'اشتراك', pick: 'اختر الاشتراك' },
+  employee:     { mod: 'hr', feature: 'emp_docs', view: 'hr.emp_docs.view', manage: 'hr.emp_docs.manage', label: 'موظف',  pick: 'اختر الموظف' },
+  car:          { mod: 'hr', feature: 'car_docs', view: 'hr.car_docs.view', manage: 'hr.car_docs.manage', label: 'سيارة', pick: 'اختر السيارة' },
+  asset:        { mod: 'it', feature: 'assets',   view: 'it.assets.view',   manage: 'it.assets.manage',   label: 'جهاز',  pick: 'اختر الجهاز' },
+  subscription: { mod: 'it', feature: 'subs',     view: 'it.subs.view',     manage: 'it.subs.manage',     label: 'اشتراك', pick: 'اختر الاشتراك' },
 };
 
-router.use(M.moduleGate('hr', 'it'));
+router.use(M.featureGate(...new Set(Object.values(KINDS).map((k) => k.feature))));
+
+/* وثائق السيارات في حدود ما يراه من السيارات: من يرى سياراته وحدها في
+   شاشة السيارات يرى وثائقها وحدها هنا، وإلا صارت هذه الشاشة باباً خلفياً
+   إلى لوحات السيارات كلها وأسماء سائقيها. والمؤرشفة خارج العمل عند الجميع. */
+function carFilter(user) {
+  if (A.isManagerLevel(user))
+    return { sql: "NOT (d.entity_kind='car' AND EXISTS (SELECT 1 FROM cars x WHERE x.id=d.entity_id AND x.archived_at IS NOT NULL))",
+             args: [] };
+  return { sql: "(d.entity_kind<>'car' OR EXISTS (SELECT 1 FROM cars x WHERE x.id=d.entity_id AND x.archived_at IS NULL AND x.assigned_to=?))",
+           args: [user.id] };
+}
+
+/** هل هذه السيارة في حدود ما يراه؟ لغير السيارات: نعم دائماً. */
+async function inScope(user, kind, entityId) {
+  if (hiddenKind(user, kind)) return false;
+  if (kind !== 'car' || A.isManagerLevel(user)) return true;
+  return !!(await db.prepare('SELECT 1 FROM cars WHERE id=? AND assigned_to=?').get(entityId, user.id));
+}
 
 /** الكيانات التي يرى هذا المستخدم وثائقها — القسم المكشوف والقدرة معاً. */
 function viewableKinds(user) {
   return Object.keys(KINDS).filter((k) => P.can(user, KINDS[k].view));
 }
 const canManage = (user, kind) => !!KINDS[kind] && P.can(user, KINDS[kind].manage);
+
+/* نوعٌ ميزتُه مخفية لا وجود له: وثيقة جهازٍ والعُهد مخفية تُجاب "غير موجود"،
+   لا "ليست لديك صلاحية" — الرفض المعلَّل يقول إن وراءه شيئاً. */
+const hiddenKind = (user, kind) => !KINDS[kind] || (user.role !== 'owner' && !P.featureEnabled(KINDS[kind].feature));
+const deny = (req, res, kind) => hiddenKind(req.user, kind)
+  ? res.status(404).json(M.NOT_FOUND) : res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
 
 /** حالة الوثيقة بلغة من يقرؤها: منتهية · تنتهي قريباً · سارية. */
 function stateOf(daysLeft, alertDays) {
@@ -110,7 +134,7 @@ router.get('/types', async (req, res) => {
 router.post('/types', async (req, res) => {
   const b = req.body || {};
   const kind = String(b.entity_kind || '');
-  if (!canManage(req.user, kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!canManage(req.user, kind)) return deny(req, res, kind);
 
   const label = String(b.label || '').trim().replace(/\s+/g, ' ');
   if (label.length < 2 || label.length > 50) return res.status(400).json({ error: 'اكتب اسم النوع (٢–٥٠ حرفاً)' });
@@ -131,7 +155,7 @@ router.post('/types', async (req, res) => {
 router.put('/types/:id', async (req, res) => {
   const t = await db.prepare('SELECT * FROM doc_types WHERE id=?').get(parseInt(req.params.id, 10));
   if (!t) return res.status(404).json({ error: 'النوع غير موجود' });
-  if (!canManage(req.user, t.entity_kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!canManage(req.user, t.entity_kind)) return deny(req, res, t.entity_kind);
 
   const b = req.body || {};
   const label = String(b.label ?? t.label).trim().replace(/\s+/g, ' ');
@@ -154,7 +178,7 @@ router.put('/types/:id', async (req, res) => {
 router.delete('/types/:id', async (req, res) => {
   const t = await db.prepare('SELECT * FROM doc_types WHERE id=?').get(parseInt(req.params.id, 10));
   if (!t) return res.status(404).json({ error: 'النوع غير موجود' });
-  if (!canManage(req.user, t.entity_kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!canManage(req.user, t.entity_kind)) return deny(req, res, t.entity_kind);
   if (t.builtin) return res.status(400).json({ error: 'الأنواع الأصلية تُعاد تسميتها أو تُطفأ ولا تُحذف' });
 
   const used = Number((await db.prepare('SELECT COUNT(*) n FROM documents WHERE type_id=?').get(t.id)).n);
@@ -170,12 +194,12 @@ router.delete('/types/:id', async (req, res) => {
    ============================================================================= */
 router.get('/entities', async (req, res) => {
   const kind = String(req.query.kind || '');
-  if (!KINDS[kind] || !P.can(req.user, KINDS[kind].view))
-    return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!KINDS[kind] || !P.can(req.user, KINDS[kind].view)) return deny(req, res, kind);
 
   const q = {
     employee:     "SELECT id, name AS label, emp_code AS sub FROM users WHERE role<>'owner' AND active=1 ORDER BY name",
-    car:          'SELECT id, plate AS label, driver_name AS sub FROM cars WHERE archived_at IS NULL ORDER BY plate',
+    car:          'SELECT id, plate AS label, driver_name AS sub FROM cars WHERE archived_at IS NULL' +
+                  (A.isManagerLevel(req.user) ? '' : ' AND assigned_to=' + Number(req.user.id)) + ' ORDER BY plate',
     asset:        "SELECT id, label, kind AS sub FROM assets WHERE status<>'مستبعدة' ORDER BY label",
     subscription: 'SELECT id, name AS label, vendor AS sub FROM subscriptions WHERE active=1 ORDER BY name',
   }[kind];
@@ -190,12 +214,12 @@ router.get('/entities', async (req, res) => {
 router.get('/', async (req, res) => {
   let kinds = viewableKinds(req.user);
   if (req.query.kind) kinds = kinds.filter((k) => k === req.query.kind);
-  if (!kinds.length) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!kinds.length) return deny(req, res, req.query.kind);
 
-  const where = [`d.entity_kind IN (${kinds.map(() => '?').join(',')})`,
-    // السيارة المؤرشفة لا تُنبّه عن استمارتها — خرجت من العمل
-    "NOT (d.entity_kind='car' AND c.archived_at IS NOT NULL)"];
-  const args = [U.today(), ...kinds];
+  // السيارة المؤرشفة لا تُنبّه عن استمارتها — خرجت من العمل
+  const cf = carFilter(req.user);
+  const where = [`d.entity_kind IN (${kinds.map(() => '?').join(',')})`, cf.sql];
+  const args = [U.today(), ...kinds, ...cf.args];
 
   const status = String(req.query.status || 'active');
   if (status === 'active' || status === 'soon') where.push("d.status='سارية'");
@@ -217,14 +241,15 @@ router.get('/', async (req, res) => {
 router.get('/alerts', async (req, res) => {
   const kinds = viewableKinds(req.user);
   if (!kinds.length) return res.json({ expired: 0, soon: 0, by_module: {} });
+  const cf = carFilter(req.user);
 
   const rows = await db.prepare(`
     SELECT d.entity_kind k,
            CAST(julianday(d.expires_at) - julianday(?) AS INTEGER) AS left, t.alert_days
     FROM documents d JOIN doc_types t ON t.id=d.type_id
     WHERE d.status='سارية' AND d.entity_kind IN (${kinds.map(() => '?').join(',')})
-      AND NOT (d.entity_kind='car' AND EXISTS (SELECT 1 FROM cars x WHERE x.id=d.entity_id AND x.archived_at IS NOT NULL))
-      AND julianday(d.expires_at) - julianday(?) <= t.alert_days`).all(U.today(), ...kinds, U.today());
+      AND ${cf.sql}
+      AND julianday(d.expires_at) - julianday(?) <= t.alert_days`).all(U.today(), ...kinds, ...cf.args, U.today());
 
   const by = {};
   let expired = 0, soon = 0;
@@ -246,10 +271,11 @@ function dateOrNull(v) {
 router.post('/', async (req, res) => {
   const b = req.body || {};
   const kind = String(b.entity_kind || '');
-  if (!canManage(req.user, kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!canManage(req.user, kind)) return deny(req, res, kind);
 
   const entityId = parseInt(b.entity_id, 10);
-  if (!(await entityExists(kind, entityId))) return res.status(400).json({ error: KINDS[kind].pick });
+  if (!(await entityExists(kind, entityId)) || !(await inScope(req.user, kind, entityId)))
+    return res.status(400).json({ error: KINDS[kind].pick });
 
   const type = await db.prepare('SELECT * FROM doc_types WHERE id=? AND entity_kind=? AND active=1')
     .get(parseInt(b.type_id, 10), kind);
@@ -282,8 +308,8 @@ router.post('/', async (req, res) => {
 // تصحيح خطأ إدخال في وثيقة سارية — لا يصلح للتجديد (التجديد يحفظ القديم)
 router.put('/:id', async (req, res) => {
   const d = await db.prepare('SELECT * FROM documents WHERE id=?').get(parseInt(req.params.id, 10));
-  if (!d) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
-  if (!canManage(req.user, d.entity_kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!d || !(await inScope(req.user, d.entity_kind, d.entity_id))) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
+  if (!canManage(req.user, d.entity_kind)) return deny(req, res, d.entity_kind);
   if (d.status !== 'سارية') return res.status(400).json({ error: 'تُعدَّل الوثيقة السارية وحدها' });
 
   const b = req.body || {};
@@ -307,8 +333,8 @@ router.put('/:id', async (req, res) => {
  */
 router.post('/:id/renew', async (req, res) => {
   const d = await db.prepare('SELECT * FROM documents WHERE id=?').get(parseInt(req.params.id, 10));
-  if (!d) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
-  if (!canManage(req.user, d.entity_kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!d || !(await inScope(req.user, d.entity_kind, d.entity_id))) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
+  if (!canManage(req.user, d.entity_kind)) return deny(req, res, d.entity_kind);
   if (d.status !== 'سارية') return res.status(400).json({ error: 'هذه الوثيقة جُدِّدت أو أُلغيت من قبل' });
 
   const b = req.body || {};
@@ -335,8 +361,8 @@ router.post('/:id/renew', async (req, res) => {
 // الإلغاء — تخرج من التنبيهات وتبقى في السجل
 router.post('/:id/cancel', async (req, res) => {
   const d = await db.prepare('SELECT * FROM documents WHERE id=?').get(parseInt(req.params.id, 10));
-  if (!d) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
-  if (!canManage(req.user, d.entity_kind)) return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!d || !(await inScope(req.user, d.entity_kind, d.entity_id))) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
+  if (!canManage(req.user, d.entity_kind)) return deny(req, res, d.entity_kind);
   if (d.status !== 'سارية') return res.status(400).json({ error: 'الوثيقة ليست سارية' });
 
   const why = String(req.body?.reason || '').trim().slice(0, 200) || null;
@@ -348,9 +374,8 @@ router.post('/:id/cancel', async (req, res) => {
 // تاريخ وثيقة كامل: كل تجديد سبقها
 router.get('/:id/history', async (req, res) => {
   const d = await db.prepare('SELECT * FROM documents WHERE id=?').get(parseInt(req.params.id, 10));
-  if (!d) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
-  if (!KINDS[d.entity_kind] || !P.can(req.user, KINDS[d.entity_kind].view))
-    return res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
+  if (!d || !(await inScope(req.user, d.entity_kind, d.entity_id))) return res.status(404).json({ error: 'الوثيقة غير موجودة' });
+  if (!KINDS[d.entity_kind] || !P.can(req.user, KINDS[d.entity_kind].view)) return deny(req, res, d.entity_kind);
 
   const rows = (await db.prepare(`${DOC_SELECT}
     WHERE d.entity_kind=? AND d.entity_id=? AND d.type_id=? ORDER BY d.expires_at DESC, d.id DESC`)

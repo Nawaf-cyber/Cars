@@ -177,7 +177,7 @@ router.delete('/:id', P.needs('employees.delete'), async (req, res) => {
   /* من بيده عهدة لم تُرجَع لا يُحذف: الحذف يُفرغ holder_id فيصير اللابتوب
      "بيد لا أحد" — ويضيع أثره بخروج آخر من يعرف أين هو. يُستلم أولاً.
      والفحص حين يكون القسم مكشوفاً وحده، فلا يكشفه رفضٌ يذكر العُهد. */
-  if (require('../permissions').moduleEnabled('it')) {
+  if (require('../permissions').featureEnabled('assets')) {
     const held = await db.prepare(
       "SELECT label FROM assets WHERE holder_id=? AND status='مُسلَّمة'").all(id);
     if (held.length)
@@ -204,8 +204,7 @@ router.delete('/:id', P.needs('employees.delete'), async (req, res) => {
   /* له تاريخ؟ يُؤرشف ولا يُحذف. الحذف يمحو رواتبه وبنوده في المسيّرات —
      ولو كانت مدفوعة — وحضوره، ويُفرغ اسمه من كل متابعة ودفعة سجّلها.
      والحذف النهائي باقٍ لحسابٍ أُنشئ بالخطأ ولم يُبنَ عليه شيء. */
-  const history = await historyOf(id);
-  const hasHistory = Object.values(history).some((n) => n > 0);
+  const { history, hasHistory } = await historyOf(id);
 
   // السيارات تنتقل لمن حُدِّد، وإلا تصير غير مسندة — كما كان الحذف يفعل
   const hisCars = (await db.prepare('SELECT COUNT(*) n FROM cars WHERE assigned_to=?').get(id)).n;
@@ -237,16 +236,30 @@ router.delete('/:id', P.needs('employees.delete'), async (req, res) => {
 /** ما بُني على هذا الحساب — يكفي واحدٌ منه ليُؤرشف بدل أن يُحذف. */
 async function historyOf(id) {
   const q = (sql, ...a) => db.prepare(sql).get(...a).then((r) => Number(r?.n || 0)).catch(() => 0);
-  return {
+  const all = {
     متابعات: await q('SELECT COUNT(*) n FROM follow_ups WHERE user_id=? OR via_user_id=?', id, id),
     دفعات: await q('SELECT COUNT(*) n FROM payments WHERE created_by=?', id),
     مسيّرات: await q('SELECT COUNT(*) n FROM payroll_items WHERE user_id=?', id),
     رواتب: await q('SELECT COUNT(*) n FROM salaries WHERE user_id=?', id),
     حضور: await q('SELECT COUNT(*) n FROM attendance WHERE user_id=?', id),
+    طلبات: await q('SELECT COUNT(*) n FROM hr_requests WHERE user_id=?', id),
+    مهام: await q('SELECT COUNT(*) n FROM tasks WHERE assignee_id=? OR created_by=?', id, id),
     عُهد: await q('SELECT COUNT(*) n FROM asset_moves WHERE user_id=?', id),
     مطالبات: await q('SELECT COUNT(*) n FROM charges WHERE created_by=?', id),
     إحالات: await q('SELECT COUNT(*) n FROM referrals WHERE owner_id=? OR helper_id=?', id, id),
     سيارات_أضافها: await q('SELECT COUNT(*) n FROM cars WHERE added_by=?', id),
+    // إقامته وعقده… تاريخٌ أيضاً — لا تبقى وثائقه يتيمة بعد محوه
+    وثائق: await q("SELECT COUNT(*) n FROM documents WHERE entity_kind='employee' AND entity_id=?", id),
+  };
+  /* كلها تمنع المحو، لكن لا يُذكر منها إلا ما له، وما ميزتُه مكشوفة.
+     كانت الأصفار تذكر «حضور» و«عُهد» في الرد وسجل النشاط والقسمان مخفيان —
+     والاسم وحده يكشف أن في النظام قسماً. */
+  const P = require('../permissions');
+  const FEATURE = { حضور: 'attendance', عُهد: 'assets', وثائق: 'emp_docs', طلبات: 'requests', مهام: 'tasks' };
+  return {
+    hasHistory: Object.values(all).some((n) => n > 0),
+    history: Object.fromEntries(Object.entries(all)
+      .filter(([k, n]) => n > 0 && (!FEATURE[k] || P.featureEnabled(FEATURE[k])))),
   };
 }
 

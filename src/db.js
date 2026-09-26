@@ -80,6 +80,9 @@ const USER_LINKS = [
   ['tickets', 'requester_id'], ['tickets', 'assignee_id'], ['ticket_notes', 'user_id'],
   // الأرشفة: من أرشف
   ['cars', 'archived_by'], ['user_archive', 'archived_by'],
+  // الطلبات والمهام والمرفقات: صاحب الطلب ومن ردّ، ومن أُسندت إليه ومن أرسلها
+  ['hr_requests', 'user_id'], ['hr_requests', 'decided_by'], ['leave_balances', 'updated_by'],
+  ['attachments', 'created_by'], ['tasks', 'assignee_id'], ['tasks', 'created_by'],
 ];
 
 /* جداول تشير إلى users بـ ON DELETE CASCADE — أي أن حذف جدول المستخدمين
@@ -89,7 +92,7 @@ const USER_LINKS = [
    فلو أُعيد بناء المستخدمين على قاعدةٍ فيها رواتب لمُحيت كلها. لم يقع لأن
    جدول الرواتب فارغ عند الشركة، لا لأن شيئاً كان يمنعه. */
 const CASCADE_TABLES = ['contact_links', 'referrals', 'salaries', 'payroll_items', 'attendance',
-                        'user_archive'];
+                        'user_archive', 'leave_balances'];
 
 /** لقطة كاملة بصفوف الجداول التي تموت مع المستخدمين. */
 async function snapshotCascades() {
@@ -560,7 +563,8 @@ async function exportToFile(targetPath) {
 
     let total = 0;
     for (const t of tables) {
-      const PAGE = 500;
+      // المرفقات ملفات لا أسطر — خمسةٌ في الدفعة لا خمسمئة، وإلا امتلأت الذاكرة
+      const PAGE = t === 'attachments' ? 5 : 500;
       for (let offset = 0; ; offset += PAGE) {
         const rows = await sql.prepare(`SELECT * FROM "${t}" LIMIT ? OFFSET ?`).all(PAGE, offset);
         if (!rows.length) break;

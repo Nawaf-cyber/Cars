@@ -19,18 +19,19 @@ const router = express.Router();
    الجهاز محفوظةً بجانبه — فيُرى الاختلاف ولا يُمحى.
    ============================================================================= */
 
-const STATUSES = ['حاضر', 'غائب', 'متأخر', 'إجازة', 'مرضية', 'مهمة عمل'];
-// ما يُخصم من الراتب: الغياب بلا عذر وحده. الإجازة والمرضية والمهمة مدفوعة.
+// «غياب بعذر» و«استئذان» يكتبهما قبولُ طلبٍ من الموظف، ويمكن تسجيلهما باليد أيضاً
+const STATUSES = ['حاضر', 'غائب', 'متأخر', 'إجازة', 'مرضية', 'مهمة عمل', 'غياب بعذر', 'استئذان'];
+// ما يُخصم من الراتب: الغياب بلا عذر وحده. الإجازة والمرضية والمهمة والعذر المقبول مدفوعة.
 const UNPAID = new Set(['غائب']);
 
-router.use(M.moduleGate('hr'));
+router.use(M.featureGate('attendance'));
 
-router.get('/people', M.needsAny('hr.view'), async (req, res) => {
+router.get('/people', M.needsAny('hr.attendance.view'), async (req, res) => {
   res.json({ people: await M.people(), statuses: STATUSES });
 });
 
 // يوم واحد: كل موظف نشط وحاله فيه
-router.get('/attendance', M.needsAny('hr.view'), async (req, res) => {
+router.get('/attendance', M.needsAny('hr.attendance.view'), async (req, res) => {
   const day = U.parseDate(req.query.day || U.today());
   if (!day || !U.isValidDate(day)) return res.status(400).json({ error: 'اليوم غير صحيح' });
 
@@ -50,7 +51,7 @@ router.get('/attendance', M.needsAny('hr.view'), async (req, res) => {
       status: r.status || 'حاضر',        // لا صفّ = حاضر
       recorded: !!r.status,
     })),
-    can_edit: P.can(req.user, 'hr.manage'),
+    can_edit: P.can(req.user, 'hr.attendance.manage'),
   });
 });
 
@@ -58,7 +59,7 @@ router.get('/attendance', M.needsAny('hr.view'), async (req, res) => {
  * حفظ يوم كامل دفعةً واحدة. "حاضر" يمحو الاستثناء اليدوي — فيعود اليوم
  * إلى أصله — ولا يمحو قراءة جهاز: تلك تبقى في device_status.
  */
-router.put('/attendance', M.needsAny('hr.manage'), async (req, res) => {
+router.put('/attendance', M.needsAny('hr.attendance.manage'), async (req, res) => {
   const b = req.body || {};
   const day = U.parseDate(b.day);
   if (!day || !U.isValidDate(day)) return res.status(400).json({ error: 'اليوم غير صحيح' });
@@ -114,10 +115,14 @@ router.put('/attendance', M.needsAny('hr.manage'), async (req, res) => {
  * خلاصة شهر لكل موظف. الخصم المقترح = أيام الغياب × (الأساسي ÷ ٣٠)،
  * وهو اقتراح يظهر في المسيّر ويُعدَّل هناك — لا قرارٌ يُفرض.
  */
-router.get('/attendance/month', M.needsAny('hr.view'), async (req, res) => {
+router.get('/attendance/month', M.needsAny('hr.attendance.view'), async (req, res) => {
   const month = String(req.query.month || U.today().slice(0, 7));
   if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'الشهر بصيغة YYYY-MM' });
-  res.json({ month, statuses: STATUSES, rows: await monthSummary(month) });
+  /* الخصم = الغياب × الأساسي ÷ ٣٠ — فمن يعرف الخصم وأيام الغياب يعرف الراتب.
+     الحضور ليس نافذةً على الرواتب: الخصم لمن يرى الرواتب وحده. */
+  const pay = P.can(req.user, 'salaries.view');
+  const rows = (await monthSummary(month)).map((r) => (pay ? r : { ...r, suggested_deduction: undefined }));
+  res.json({ month, statuses: STATUSES, rows, shows_pay: pay });
 });
 
 async function monthSummary(month) {

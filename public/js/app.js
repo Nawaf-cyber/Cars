@@ -323,6 +323,7 @@ const LOADERS = {
 function switchTab(name) {
   $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab-panel').forEach((p) => p.classList.toggle('hidden', p.id !== 'tab-' + name));
+  document.body.classList.remove('has-save-bar');   // الشريط يغيب مع قسمه، فلا ترتفع التنبيهات فوق فراغ
   LOADERS[name]?.();
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) switchTab(b.dataset.tab); };
@@ -2321,11 +2322,23 @@ let permPending = {};
 let permRole = null;      // الدور المعروض حالياً
 let permData = null;      // آخر ردّ من الخادم
 
+/** عدد المفاتيح التي غُيّرت ولم تُحفظ — ويُظهر شريط الحفظ أسفل الشاشة ما دامت. */
+function syncPermBar() {
+  const n = Object.values(permPending).reduce((a, ch) => a + Object.keys(ch).length, 0);
+  $('#perm-save').disabled = !n;
+  $('#perm-save-bar').disabled = false;
+  $('#perm-bar').classList.toggle('hidden', !n);
+  document.body.classList.toggle('has-save-bar', !!n);
+  $('#perm-bar-text').textContent = n === 1 ? 'تغيير واحد لم يُحفظ'
+    : n === 2 ? 'تغييران لم يُحفظا'
+    : n <= 10 ? `${num(n)} تغييرات لم تُحفظ` : `${num(n)} تغييراً لم يُحفظ`;
+}
+
 async function loadPermissions() {
   const box = $('#perm-body');
   box.innerHTML = '<span class="spin"></span> جارٍ التحميل…';
   permPending = {};
-  $('#perm-save').disabled = true;
+  syncPermBar();
 
   try { permData = await api('/admin/permissions'); }
   catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
@@ -2362,6 +2375,7 @@ function renderRolesPanel() {
     if (Object.keys(permPending).length &&
         !confirm('لديك تغييرات غير محفوظة — هل تتركها؟')) return;
     permPending = {};
+    syncPermBar();
     permRole = b.dataset.role;
     renderRolesPanel();
     renderPermTable();
@@ -2422,10 +2436,22 @@ function renderPermTable() {
         }).join('')}
       </div>`).join('')}`;
 
-  $$('#perm-body input[data-capk]').forEach((cb) => cb.onchange = () => {
-    (permPending[role.key] ||= {})[cb.dataset.capk] = cb.checked ? 1 : 0;
+  /* قدرةٌ تقوم على أخرى (الإدارة على الرؤية): تشغيلها يشغّل ما تقوم عليه،
+     وإطفاء الأساس يطفئ ما فوقه — كما يفعل الخادم، فلا يُحفظ غير ما يُرى */
+  const mark = (cb, v) => {
+    if (!cb || cb.disabled) return;
+    cb.checked = v;
+    (permPending[role.key] ||= {})[cb.dataset.capk] = v ? 1 : 0;
     cb.closest('.perm-row').classList.add('perm-dirty');
-    $('#perm-save').disabled = false;
+  };
+  const box$ = (k) => $(`#perm-body input[data-capk="${k}"]`);
+  $$('#perm-body input[data-capk]').forEach((cb) => cb.onchange = () => {
+    mark(cb, cb.checked);
+    const c = permData.capabilities.find((x) => x.key === cb.dataset.capk);
+    if (cb.checked && c?.requires) mark(box$(c.requires), true);
+    if (!cb.checked)
+      permData.capabilities.filter((x) => x.requires === cb.dataset.capk).forEach((x) => mark(box$(x.key), false));
+    syncPermBar();
   });
 
   const ren = $('#role-rename');
@@ -2499,23 +2525,32 @@ async function roleForm(existing) {
   };
 }
 
-$('#perm-save').onclick = async () => {
-  const btn = $('#perm-save');
-  btn.disabled = true;
+/* زرّان يحفظان الشيء نفسه: أعلى القسم، وفي الشريط الثابت أسفل الشاشة */
+async function savePermissions() {
+  const btns = [$('#perm-save'), $('#perm-save-bar')];
+  btns.forEach((b) => { b.disabled = true; });
   try {
     let n = 0;
     for (const [role, changes] of Object.entries(permPending)) {
       const r = await api('/admin/permissions/' + role, { method: 'PUT', body: { changes } });
       n += r.changed;
+      delete permPending[role];   // ما حُفظ لا يُعاد إرساله إن تعثّر دورٌ بعده
     }
-    permPending = {};
+    syncPermBar();
     toast(`تم حفظ ${n} مفتاحاً — سارية الآن`, 'ok');
     // قد يكون غيّر صلاحيات دوره غير مباشرة، فنحدّث قدراتنا
     const me = await api('/auth/me');
     S.user = me.user;
     showApp();
     loadPermissions();
-  } catch (e) { toast(e.message, 'bad'); btn.disabled = false; }
+  } catch (e) { toast(e.message, 'bad'); syncPermBar(); }
+}
+$('#perm-save').onclick = savePermissions;
+$('#perm-save-bar').onclick = savePermissions;
+$('#perm-undo').onclick = () => {
+  permPending = {};
+  syncPermBar();
+  renderPermTable();
 };
 
 /* ============================================================

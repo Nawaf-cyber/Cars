@@ -228,6 +228,14 @@
       <p class="muted">اختر مسمّى ثم شغّل أو أطفئ مفاتيحه — تسري فوراً على كل من يحمله بلا إعادة تشغيل.</p>
       <div class="panel" id="roles-panel"></div>
       <div class="panel" id="perm-body"></div>
+      <!-- يبقى أسفل الشاشة ما دام هناك ما لم يُحفظ: المفاتيح طويلة، وزر الأعلى
+           يغيب عن النظر حين ينزل المستخدم إليها -->
+      <div id="perm-bar" class="save-bar hidden">
+        <span id="perm-bar-text"></span>
+        <span class="grow"></span>
+        <button class="btn" id="perm-undo">تراجع</button>
+        <button class="btn primary" id="perm-save-bar">حفظ التغييرات</button>
+      </div>
     </section>
 
     <!-- ---------- الرواتب ---------- -->

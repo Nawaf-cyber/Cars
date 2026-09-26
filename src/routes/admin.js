@@ -34,15 +34,18 @@ router.get('/permissions', canTunePermissions, async (req, res) => {
     });
   }
 
+  // القدرات التي يملكها هو فقط — فلا يرى مفاتيح الاشتراك والربط ولا يعرف بها
+  const capabilities = P.visibleCapabilities(req.user);
+  const shown = new Set(capabilities.map((c) => c.key));
   res.json({
-    // القدرات التي يملكها هو فقط — فلا يرى مفاتيح الاشتراك والربط ولا يعرف بها
-    capabilities: P.visibleCapabilities(req.user),
+    capabilities,
     roles,
     matrix: P.matrix(req.user),
     plan_features: P.planFeatures(),
     locked: [...P.PLAN_CAPS].filter((c) => !P.planAllows(c)),
     // الأرضية: لكل قدرة أدنى مستوى يحملها، واسمه — تُعرض مطفأةً لمن دونه
-    floors: Object.fromEntries(Object.entries(P.FLOOR_OF).map(([k, rank]) =>
+    // ولما يراه وحده: أرضية قدرةٍ في قسم مخفي تذكر اسمها، والاسم يكشف القسم
+    floors: Object.fromEntries(Object.entries(P.FLOOR_OF).filter(([k]) => shown.has(k)).map(([k, rank]) =>
       [k, { rank, label: P.floorLabel(k) }])),
   });
 });
@@ -177,7 +180,7 @@ router.post('/payroll', P.needs('salaries.manage'), async (req, res) => {
      ما دام مخفياً فالمسيّر كما كان تماماً: القسم المخفي لا يغيّر ما تراه
      الشركة، ولو سجّل فيه المالك حضوراً ليجرّبه. */
   const absences = {};
-  if (P.moduleEnabled('hr')) {
+  if (P.featureEnabled('attendance')) {
     for (const r of await require('./hr').monthSummary(month))
       if (r.unpaid_days) absences[r.user_id] = r;
   }

@@ -121,36 +121,113 @@ const CAPABILITIES = [
   // المالك يتجاوزها دائماً، ويستطيع منحها لمن يشاء بضغطة.
   { key: 'integrations.manage', group: 'النظام',   label: 'ربط البرامج الخارجية (زوهو · تم)' },
 
-  /* الأقسام المخفية — module يربط القدرة بقسم يكشفه المالك وحده.
-     ما دام القسم مطفأً فقدراته لا تعمل لأحد، ولا تظهر في شاشة المفاتيح،
+  /* الأقسام المخفية — feature يربط القدرة بميزة يكشفها المالك وحده.
+     ما دامت الميزة مطفأة فقدراتها لا تعمل لأحد، ولا تظهر في شاشة المفاتيح،
      ولا يُذكر اسمها في أي ردّ. تختلف عن plan: تلك تظهر رماديةً عرضاً
-     للبيع، وهذه لا يعرف أحدٌ بوجودها حتى تُكشف. */
-  { key: 'hr.view',   group: 'الموارد البشرية', module: 'hr', label: 'رؤية الوثائق والتنبيهات والحضور' },
-  { key: 'hr.manage', group: 'الموارد البشرية', module: 'hr', label: 'إضافة الوثائق وتجديدها وتسجيل الحضور' },
-  { key: 'it.view',   group: 'تقنية المعلومات', module: 'it', label: 'رؤية العُهد والاشتراكات وطلبات الدعم' },
-  { key: 'it.manage', group: 'تقنية المعلومات', module: 'it', label: 'إدارة العُهد والاشتراكات وطلبات الدعم' },
-  { key: 'it.self',   group: 'تقنية المعلومات', module: 'it', label: 'رفع طلب دعم فني ورؤية العُهد التي بيده' },
+     للبيع، وهذه لا يعرف أحدٌ بوجودها حتى تُكشف.
+     requires: الإدارة بلا رؤية لا معنى لها — فلا تعمل الأولى إلا مع الثانية. */
+  { key: 'hr.emp_docs.view',     group: 'الموارد البشرية', feature: 'emp_docs',   label: 'وثائق الموظفين — رؤيتها وتنبيهاتها' },
+  { key: 'hr.emp_docs.manage',   group: 'الموارد البشرية', feature: 'emp_docs',   label: 'وثائق الموظفين — إضافتها وتجديدها وأنواعها', requires: 'hr.emp_docs.view' },
+  { key: 'hr.car_docs.view',     group: 'الموارد البشرية', feature: 'car_docs',   label: 'وثائق السيارات — رؤيتها وتنبيهاتها (للسيارات التي يراها)' },
+  { key: 'hr.car_docs.manage',   group: 'الموارد البشرية', feature: 'car_docs',   label: 'وثائق السيارات — إضافتها وتجديدها وأنواعها', requires: 'hr.car_docs.view' },
+  { key: 'hr.attendance.view',   group: 'الموارد البشرية', feature: 'attendance', label: 'الحضور — رؤية اليوم وملخص الشهر' },
+  // الحضور يغيّر الراتب (خصم الغياب) — فلا ينزل تسجيله عن مشرف القسم
+  { key: 'hr.attendance.manage', group: 'الموارد البشرية', feature: 'attendance', label: 'الحضور — تسجيله', requires: 'hr.attendance.view', min_rank: 1 },
+  { key: 'hr.requests.raise',  group: 'الموارد البشرية', feature: 'requests', label: 'طلبات الحضور — تقديم طلب إجازة أو استئذان أو عذر غياب' },
+  { key: 'hr.requests.view',   group: 'الموارد البشرية', feature: 'requests', label: 'طلبات الحضور — رؤية طلبات الجميع ومرفقاتها' },
+  // القبول يكتب في الحضور ويرفع الخصم — كتسجيل الحضور، لا ينزل عن مشرف القسم
+  { key: 'hr.requests.manage', group: 'الموارد البشرية', feature: 'requests', label: 'طلبات الحضور — قبولها ورفضها وضبط رصيد الإجازات', requires: 'hr.requests.view', min_rank: 1 },
+
+  { key: 'tasks.receive',  group: 'المهام', feature: 'tasks',    label: 'استلام المهام والرد عليها (إنجاز أو اعتذار)' },
+  { key: 'tasks.assign',   group: 'المهام', feature: 'assign',   label: 'إرسال المهام لأي موظف ومتابعتها وإسنادها لغيره' },
+  { key: 'overview.view',  group: 'المهام', feature: 'overview', label: 'لوحة الموظفين — ملخص كل موظف (اطلاع فقط)' },
+
+  { key: 'it.assets.view',     group: 'تقنية المعلومات', feature: 'assets',   label: 'العُهد — رؤية الأجهزة وسجلها وضماناتها' },
+  { key: 'it.assets.manage',   group: 'تقنية المعلومات', feature: 'assets',   label: 'العُهد — إضافة الأجهزة وتسليمها واستلامها', requires: 'it.assets.view' },
+  { key: 'it.mine',            group: 'تقنية المعلومات', feature: 'mine',     label: 'عُهدتي — رؤية الأجهزة التي بيده' },
+  { key: 'it.subs.view',       group: 'تقنية المعلومات', feature: 'subs',     label: 'الاشتراكات — رؤيتها ومواعيد تجديدها' },
+  { key: 'it.subs.manage',     group: 'تقنية المعلومات', feature: 'subs',     label: 'الاشتراكات — إضافتها وتعديلها وتجديدها', requires: 'it.subs.view' },
+  { key: 'it.tickets.raise',   group: 'تقنية المعلومات', feature: 'tickets',  label: 'رفع طلب دعم فني ومتابعة طلباته' },
+  { key: 'it.helpdesk.view',   group: 'تقنية المعلومات', feature: 'helpdesk', label: 'طلبات الدعم — رؤية طلبات الجميع' },
+  { key: 'it.helpdesk.manage', group: 'تقنية المعلومات', feature: 'helpdesk', label: 'طلبات الدعم — معالجتها والرد عليها', requires: 'it.helpdesk.view' },
 ];
 
 const CAP_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 const CAP_LABEL = Object.fromEntries(CAPABILITIES.map((c) => [c.key, c.label]));
 const PLAN_CAPS = new Set(CAPABILITIES.filter((c) => c.plan).map((c) => c.key));
 
-/** الأقسام التي يكشفها المالك للشركة متى شاء. */
-const MODULES = { hr: 'الموارد البشرية', it: 'تقنية المعلومات' };
-const MODULE_OF = Object.fromEntries(CAPABILITIES.filter((c) => c.module).map((c) => [c.key, c.module]));
+/* =============================================================================
+   الأقسام المخفية — تُكشف ميزةً ميزة
+   ---------------------------------------------------------------------------
+   parent: ميزةٌ لا تقوم وحدها. «عُهدتي» عرضٌ لسجل العُهد، فبلا العُهد
+   تظهر فارغة؛ ومعالجة الطلبات بلا رفعها لا يصلها طلب. فالتابعة لا تعمل
+   إلا مع أمّها، وإخفاء الأم يُخفيها معها.
+   ============================================================================= */
+const MODULES = { hr: 'الموارد البشرية', it: 'تقنية المعلومات', tasks: 'المهام' };
+const FEATURES = {
+  emp_docs:   { module: 'hr', label: 'وثائق الموظفين' },
+  car_docs:   { module: 'hr', label: 'وثائق السيارات' },
+  attendance: { module: 'hr', label: 'الحضور' },
+  requests:   { module: 'hr', label: 'طلبات الحضور (إجازة · استئذان · عذر)' },
+  assets:     { module: 'it', label: 'العُهد' },
+  mine:       { module: 'it', label: 'عُهدتي',            parent: 'assets' },
+  subs:       { module: 'it', label: 'الاشتراكات' },
+  tickets:    { module: 'it', label: 'رفع طلب دعم' },
+  helpdesk:   { module: 'it', label: 'معالجة طلبات الدعم', parent: 'tickets' },
+  // إرسال المهام بلا من يستلمها لا يصل لأحد
+  tasks:      { module: 'tasks', label: 'استلام المهام' },
+  assign:     { module: 'tasks', label: 'إرسال المهام ومتابعتها', parent: 'tasks' },
+  overview:   { module: 'tasks', label: 'لوحة الموظفين' },
+};
+const FEATURE_OF = Object.fromEntries(CAPABILITIES.filter((c) => c.feature).map((c) => [c.key, c.feature]));
+const MODULE_OF = Object.fromEntries(Object.entries(FEATURE_OF).map(([k, f]) => [k, FEATURES[f].module]));
+const REQUIRES = Object.fromEntries(CAPABILITIES.filter((c) => c.requires).map((c) => [c.key, c.requires]));
 
-/** هل كُشف هذا القسم للشركة؟ */
+/** ما كتبه المالك في الإعداد. "hr" أو "it" وحدها — كما كانت تُحفظ قبل
+    التقسيم — تعني القسم كله، فلا يختفي ما كشفه قبله. */
+function listedFeatures() {
+  const raw = String(cache.settings().modules_enabled || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const out = new Set();
+  for (const k of raw) {
+    if (FEATURES[k]) out.add(k);
+    else if (MODULES[k]) for (const [f, d] of Object.entries(FEATURES)) if (d.module === k) out.add(f);
+  }
+  return out;
+}
+
+/** هل كُشفت هذه الميزة — هي وأمّها؟ */
+function featureEnabled(feature, listed = listedFeatures()) {
+  const d = FEATURES[feature];
+  if (!d || !listed.has(feature)) return false;
+  return !d.parent || featureEnabled(d.parent, listed);
+}
+
+/** الميزات المكشوفة فعلاً — بعد إسقاط ما أمّه مخفية. */
+function enabledFeatures() {
+  const listed = listedFeatures();
+  return Object.keys(FEATURES).filter((f) => featureEnabled(f, listed));
+}
+
+/** هل في هذا القسم ميزةٌ مكشوفة واحدة على الأقل؟ */
 function moduleEnabled(mod) {
-  const raw = String(cache.settings().modules_enabled || '');
-  return raw.split(',').map((s) => s.trim()).includes(mod);
+  return enabledFeatures().some((f) => FEATURES[f].module === mod);
 }
 
-/** قدرةٌ في قسم لم يُكشف بعد — لا تعمل، ولا تُرى، ولا تُذكر. */
+/** قدرةٌ في ميزة لم تُكشف بعد — لا تعمل، ولا تُرى، ولا تُذكر. */
 function hiddenCap(capability) {
-  const mod = MODULE_OF[capability];
-  return !!mod && !moduleEnabled(mod);
+  const f = FEATURE_OF[capability];
+  return !!f && !featureEnabled(f);
 }
+
+/** القدرات القديمة قبل التقسيم، وما صار كلٌّ منها. من ضبط صفاً منها
+    يجد ضبطه في القدرات الجديدة كما تركه، لا الافتراضيات. */
+const LEGACY_CAPS = {
+  'hr.view':   ['hr.emp_docs.view', 'hr.car_docs.view', 'hr.attendance.view'],
+  'hr.manage': ['hr.emp_docs.manage', 'hr.car_docs.manage', 'hr.attendance.manage'],
+  'it.view':   ['it.assets.view', 'it.subs.view', 'it.helpdesk.view'],
+  'it.manage': ['it.assets.manage', 'it.subs.manage', 'it.helpdesk.manage'],
+  'it.self':   ['it.mine', 'it.tickets.raise'],
+};
 
 /* =============================================================================
    الأرضية — أدنى مستوى يجوز أن يحمل القدرة
@@ -182,7 +259,9 @@ function floorLabel(capability) {
    لا تعمل ما دام القسم مطفأً — لكنها تجعل كشفه ضغطةً واحدة: يُفتح القسم
    فيجده المدير جاهزاً. وإطفاؤه يُخفيه عن الجميع دفعةً واحدة، مهما وزّع
    المدير منه على من تحته. */
-const MODULE_DEFAULTS_TOP = ['hr.view', 'hr.manage', 'it.view', 'it.manage', 'it.self'];
+const MODULE_DEFAULTS_TOP = CAPABILITIES.filter((c) => c.feature).map((c) => c.key);
+// لكل موظف: عُهدته، وطلب الدعم، وطلب الإجازة والاستئذان، واستلام مهامه
+const MODULE_DEFAULTS_SELF = ['it.mine', 'it.tickets.raise', 'hr.requests.raise', 'tasks.receive'];
 
 /** الإعدادات الافتراضية عند أول تشغيل — يعدّلها مشرف الموظفين بعدها كما يشاء. */
 const DEFAULTS = {
@@ -221,14 +300,14 @@ const DEFAULTS = {
     'charges.view',
     'employees.view',
     'reports.performance', 'reports.export',
-    'it.self',
+    ...MODULE_DEFAULTS_SELF,
   ],
   employee: [
     'cars.edit_contact', 'cars.set_state', 'followups.create', 'payments.create',
     'charges.view', 'charges.settle',
     // يصدّر سياراته وحده — الحصر في المسار لا في الواجهة
     'reports.export',
-    'it.self',
+    ...MODULE_DEFAULTS_SELF,
   ],
 };
 
@@ -237,9 +316,20 @@ async function ensureDefaults() {
   const ins = db.prepare(
     'INSERT INTO role_permissions (role, capability, enabled) VALUES (?,?,?) ON CONFLICT(role, capability) DO NOTHING'
   );
+  // صفوف القدرات القديمة: القدرة الجديدة ترث قيمتها بدل الافتراضي
+  const old = Object.keys(LEGACY_CAPS);
+  const legacy = {};
+  const oldRows = await db.prepare('SELECT role, capability, enabled FROM role_permissions WHERE capability IN (' +
+    old.map(() => '?').join(',') + ')').all(...old);
+  for (const r of oldRows)
+    for (const cap of LEGACY_CAPS[r.capability]) legacy[r.role + '|' + cap] = r.enabled ? 1 : 0;
+
   for (const role of clientRoleKeys()) {
     const on = new Set(DEFAULTS[role] || []);
-    for (const c of CAPABILITIES) await ins.run(role, c.key, on.has(c.key) ? 1 : 0);
+    for (const c of CAPABILITIES) {
+      const inherited = legacy[role + '|' + c.key];
+      await ins.run(role, c.key, inherited !== undefined ? inherited : on.has(c.key) ? 1 : 0);
+    }
   }
   await cache.reloadPermissions();
 }
@@ -256,7 +346,8 @@ function matrix(user) {
                      : Object.values(allRoles()).filter((r) => !r.hidden);
   const out = {};
   for (const r of roles) {
-    const row = { ...(live[r.key] || {}) };
+    // صفوف القدرات القديمة تبقى في القاعدة ولا تُعرض — لم يعد لها مفتاح
+    const row = Object.fromEntries(Object.entries(live[r.key] || {}).filter(([k]) => CAP_KEYS.has(k)));
     if (user && user.role !== 'owner')
       for (const c of CAPABILITIES)
         if (!grantedByRole(user, c.key) && !PLAN_CAPS.has(c.key)) delete row[c.key];
@@ -280,6 +371,7 @@ function grantedByRole(user, capability) {
   if (user.role === 'owner') return true;
   if (hiddenCap(capability)) return false;
   if (belowFloor(user.role, capability)) return false;   // تحت الأرضية: كأنها لم تُمنح
+  if (REQUIRES[capability] && !grantedByRole(user, REQUIRES[capability])) return false;
   return !!cache.permissions()[user.role]?.[capability];
 }
 
@@ -312,6 +404,9 @@ function can(user, capability) {
 
   // تحت الأرضية: لا تعمل ولو كان صفّها مشغّلاً من قبل
   if (belowFloor(user.role, capability)) return false;
+
+  // الإدارة بلا الرؤية التي تقوم عليها: لا تعمل
+  if (REQUIRES[capability] && !can(user, REQUIRES[capability])) return false;
 
   return !!cache.permissions()[user.role]?.[capability];
 }
@@ -370,18 +465,38 @@ async function setRolePermissions(role, changes, actor) {
                          VALUES (?,?,?)
                          ON CONFLICT(role, capability)
                          DO UPDATE SET enabled=excluded.enabled, updated_at=datetime('now','+3 hours')`);
+  /* الإدارة تستلزم الرؤية: تشغيل الإدارة يشغّل رؤيتها معها، وإطفاء الرؤية
+     يطفئ إدارتها. وإن طُلبا معاً متعارضين (إدارة بلا رؤية) فالإطفاء يغلب —
+     الأضيق هو الأسلم. */
+  const current = cache.permissions()[role] || {};
+  const want = { ...(changes || {}) };
+  const onAfter = (c) => (c in want ? !!want[c] : !!current[c]);
+  for (const [cap, req] of Object.entries(REQUIRES)) {
+    if (want[cap] && !onAfter(req)) {
+      if (req in want) want[cap] = 0;   // طُلب إطفاء الرؤية صراحةً
+      else want[req] = 1;
+    }
+    if (onAfter(cap) && !onAfter(req)) want[cap] = 0;
+  }
+
   let n = 0;
   const refused = [], floored = [];
-  for (const [cap, val] of Object.entries(changes || {})) {
+  const blocked = new Set();
+  for (const [cap, val] of Object.entries(want)) {
     if (!CAP_KEYS.has(cap)) continue;
     /* قدرة قسم مخفي تُعامَل كمفتاح لا وجود له — لا تُرفض باسمها، فالرفض
        المعلَّل يذكر اسمها، وذكرُه وحده يكشف أن في النظام قسماً مخفياً. */
-    if (actorRole !== 'owner' && hiddenCap(cap)) continue;
+    if (actorRole !== 'owner' && hiddenCap(cap)) { blocked.add(cap); continue; }
     /* الأرضية على الجميع، والمالك معهم: منحٌ تحت الأرضية لن يعمل أصلاً،
        فقبولُه يُظهر مفتاحاً مشغّلاً لا يفعل شيئاً. من احتاج أن يحذف فمكانه
        مسمّى في مستوى الأرضية أو فوقها. */
-    if (val && belowFloor(role, cap)) { floored.push(cap); continue; }
-    if (val && !grantedByRole(actorUser, cap)) { refused.push(cap); continue; }
+    if (val && belowFloor(role, cap)) { floored.push(cap); blocked.add(cap); continue; }
+    if (val && !grantedByRole(actorUser, cap)) { refused.push(cap); blocked.add(cap); }
+  }
+  for (const [cap, val] of Object.entries(want)) {
+    if (!CAP_KEYS.has(cap) || blocked.has(cap)) continue;
+    // إدارةٌ رُفضت رؤيتُها لا تُكتب وحدها — والرسالة تذكر الرؤية
+    if (val && REQUIRES[cap] && blocked.has(REQUIRES[cap])) continue;
     await up.run(role, cap, val ? 1 : 0);
     n++;
   }
@@ -408,7 +523,8 @@ module.exports = {
   allRoles, roleOf, rankOf, labelOf, visibleRoles, assignableRoles, canAssignRole, clientRoleKeys,
   ensureDefaults, matrix, visibleCapabilities, grantedByRole, can, needs, setRolePermissions, capsOf, planAllows, planFeatures,
   // الأقسام المخفية
-  MODULES, MODULE_OF, moduleEnabled, hiddenCap,
+  MODULES, FEATURES, FEATURE_OF, MODULE_OF, REQUIRES, LEGACY_CAPS,
+  featureEnabled, enabledFeatures, moduleEnabled, hiddenCap,
   // الأرضية
   FLOOR_OF, belowFloor, floorLabel,
 };

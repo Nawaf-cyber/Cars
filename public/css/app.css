@@ -198,6 +198,16 @@ table.data .empty{text-align:center;color:var(--muted);padding:2.5rem}
 .toast.ok{background:var(--ok)} .toast.bad{background:var(--bad)} .toast.warn{background:var(--warn)}
 @keyframes slide{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:none}}
 
+/* ---------- شريط الحفظ الثابت ----------
+   ملتصق بأسفل الشاشة داخل قسمه: يظهر ما دام في القسم ما لم يُحفظ، ويختفي
+   مع القسم حين يُترك. والتنبيهات ترتفع فوقه فلا يغطّي أحدهما الآخر. */
+.save-bar{position:sticky;bottom:0;z-index:60;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r) var(--r) 0 0;
+  padding:.7rem 1rem;margin-top:.5rem;box-shadow:0 -6px 20px rgba(10,20,40,.12)}
+.save-bar #perm-bar-text{font-weight:600}
+.save-bar .grow{min-width:0}
+body.has-save-bar #toasts{bottom:5rem}
+
 .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:var(--brand);
   border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}

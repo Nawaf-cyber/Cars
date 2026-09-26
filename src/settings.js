@@ -39,6 +39,9 @@ function allSettings() {
   const merged = { ...DEFAULTS, ...Object.fromEntries(
     Object.entries(cache.settings()).filter(([, v]) => v !== null && v !== '')) };
   for (const k of OWNER_ONLY) delete merged[k];
+  /* إعدادات الأقسام (hr_*) تخصّ من يديرها ويقرؤها مسارها — لا تُرسل لكل
+     جلسة، وإلا قرأ الموظف أسماءها وقسمها مخفي. */
+  for (const k of Object.keys(merged)) if (k.startsWith('hr_')) delete merged[k];
   return merged;
 }
 

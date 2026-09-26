@@ -12,12 +12,12 @@ const db = require('./db');
 
 const NOT_FOUND = { error: 'المسار غير موجود' };   // حرفياً كالرد العام في server.js
 
-/** يمرّ المالك دائماً؛ وغيره لا يمرّ إلا إن كان القسم مكشوفاً. */
-function moduleGate(...mods) {
+/** يمرّ المالك دائماً؛ وغيره لا يمرّ إلا إن كانت إحدى الميزات مكشوفة. */
+function featureGate(...features) {
   return (req, res, next) => {
     if (!req.user) return res.status(404).json(NOT_FOUND);
     if (req.user.role === 'owner') return next();
-    if (mods.some((m) => P.moduleEnabled(m))) return next();
+    if (features.some((f) => P.featureEnabled(f))) return next();
     return res.status(404).json(NOT_FOUND);
   };
 }
@@ -29,6 +29,9 @@ function moduleGate(...mods) {
 function needsAny(...caps) {
   return (req, res, next) => {
     if (caps.some((c) => P.can(req.user, c))) return next();
+    /* الأقسام تُكشف ميزةً ميزة: قد يكون القسم مكشوفاً وهذه الميزة فيه مخفية
+       (الطلبات دون العُهد). فمسارها لا وجود له — لا "ليست لديك صلاحية". */
+    if (req.user?.role !== 'owner' && caps.every((c) => P.hiddenCap(c))) return res.status(404).json(NOT_FOUND);
     res.status(403).json({ error: 'ليست لديك صلاحية لهذا الإجراء' });
   };
 }
@@ -45,7 +48,7 @@ async function people() {
 
 /** هل يحق لهذا المستخدم أن تُحمَّل له واجهة الأقسام؟ */
 function wantsDeptsUI(user) {
-  return ['hr.view', 'it.view', 'it.self'].some((c) => P.can(user, c));
+  return Object.keys(P.FEATURE_OF).some((c) => P.can(user, c));
 }
 
-module.exports = { moduleGate, needsAny, people, wantsDeptsUI, NOT_FOUND };
+module.exports = { featureGate, needsAny, people, wantsDeptsUI, NOT_FOUND };

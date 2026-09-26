@@ -361,7 +361,11 @@ router.delete('/:id', P.needs('cars.delete'), async (req, res) => {
     دفعات: await n('SELECT COUNT(*) n FROM payments WHERE car_id=?'),
     مطالبات: await n('SELECT COUNT(*) n FROM charges WHERE car_id=?'),
   };
-  const hasHistory = Object.values(history).some((x) => x > 0);
+  /* وثائقها (استمارة، تأمين…) تاريخٌ أيضاً — تُؤرشف معها ولا تبقى يتيمة.
+     وتُذكر حين توجد وميزتها مكشوفة: الاسم وحده يكشف قسماً مخفياً. */
+  const docs = await n("SELECT COUNT(*) n FROM documents WHERE entity_kind='car' AND entity_id=?");
+  if (docs && require('../permissions').featureEnabled('car_docs')) history.وثائق = docs;
+  const hasHistory = docs > 0 || Object.values(history).some((x) => x > 0);
 
   if (!hasHistory) {
     (await db.prepare('DELETE FROM cars WHERE id=?').run(id));

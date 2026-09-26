@@ -223,22 +223,37 @@
     try { d = await api('/owner/modules'); }
     catch (e) { box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`; return; }
 
+    const all = d.modules.flatMap((m) => m.features);
     box.innerHTML = d.modules.map((m) => `
-      <label class="check" style="padding:.5rem 0;border-bottom:1px solid var(--line)">
-        <input type="checkbox" data-mod="${esc(m.key)}" ${m.enabled ? 'checked' : ''}>
+      <div style="padding:.5rem 0;border-bottom:1px solid var(--line)">
         <b>${esc(m.label)}</b>
-        <span class="badge ${m.enabled ? 'ok' : ''}" style="margin-right:.4rem">${m.enabled ? 'مكشوف للشركة' : 'مخفي'}</span>
-        <div class="muted" style="margin-top:.2rem">${m.caps.map((c) => esc(c.label)).join(' · ')}</div>
-      </label>`).join('') + `
+        <span class="badge ${m.enabled ? 'ok' : ''}" style="margin-right:.4rem">${m.enabled ? 'فيه ما هو مكشوف' : 'مخفي كله'}</span>
+        ${m.features.map((f) => `
+          <label class="check" style="display:block;margin:.4rem 1.2rem 0 0">
+            <input type="checkbox" data-feat="${esc(f.key)}" ${f.parent ? `data-parent="${esc(f.parent)}"` : ''} ${f.enabled ? 'checked' : ''}>
+            ${esc(f.label)}
+            ${f.parent ? `<span class="muted">— تتبع «${esc(f.parent_label)}»</span>` : ''}
+            <span class="badge ${f.enabled ? 'ok' : ''}" style="margin-right:.4rem">${f.enabled ? 'مكشوفة' : 'مخفية'}</span>
+            <div class="muted" style="margin-top:.1rem">${f.caps.map((c) => esc(c.label)).join(' · ')}</div>
+          </label>`).join('')}
+      </div>`).join('') + `
       <div class="row gap" style="margin-top:.8rem">
         <button class="btn primary" id="mod-save">حفظ</button>
       </div>`;
 
+    /* التابعة تتبع أمّها في الشاشة كما في الخادم: تشغيلها يشغّل الأم،
+       وإطفاء الأم يطفئها — فلا يُرسل المالك ما سيُرفض */
+    const boxOf = (k) => $(`#own-modules [data-feat="${k}"]`);
+    $$('#own-modules [data-feat]').forEach((i) => i.onchange = () => {
+      if (i.checked && i.dataset.parent) boxOf(i.dataset.parent).checked = true;
+      if (!i.checked) $$(`#own-modules [data-parent="${i.dataset.feat}"]`).forEach((c) => { c.checked = false; });
+    });
+
     $('#mod-save', box).onclick = async () => {
-      const on = $$('#own-modules [data-mod]:checked').map((i) => i.dataset.mod);
+      const on = $$('#own-modules [data-feat]:checked').map((i) => i.dataset.feat);
       try {
         await api('/owner/modules', { method: 'PUT', body: { enabled: on } });
-        toast(on.length ? 'كُشف للشركة: ' + on.map((k) => d.modules.find((m) => m.key === k).label).join('، ')
+        toast(on.length ? 'كُشف للشركة: ' + on.map((k) => all.find((f) => f.key === k).label).join('، ')
                         : 'الأقسام كلها مخفية عن الشركة', 'ok');
         loadOwnerModules();
       } catch (e) { toast(e.message, 'bad'); }

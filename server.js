@@ -317,6 +317,8 @@ app.use('/api/referrals', require('./src/routes/referrals'));
 app.use('/api/docs', require('./src/routes/docs'));
 app.use('/api/hr', require('./src/routes/hr'));
 app.use('/api/it', require('./src/routes/it'));
+app.use('/api/requests', require('./src/routes/requests'));
+app.use('/api/tasks', require('./src/routes/tasks'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/users', require('./src/routes/users'));

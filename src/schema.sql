@@ -412,6 +412,81 @@ CREATE TABLE IF NOT EXISTS user_archive (
   archived_at TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
 );
 
+-- ---------- طلبات الموظفين: إجازة · مرضية · عذر غياب · استئذان ----------
+-- الموظف يقدّم، والموارد البشرية تقبل أو ترفض. المقبول يُكتب في الحضور
+-- تلقائياً فلا يُحسب غياباً. لا CHECK على النوع والحالة: القيد في الكود،
+-- وتغييره لا يحتاج إعادة بناء جدول.
+CREATE TABLE IF NOT EXISTS hr_requests (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind          TEXT    NOT NULL,             -- إجازة | إجازة مرضية | عذر غياب | استئذان
+  from_day      TEXT    NOT NULL,             -- YYYY-MM-DD
+  to_day        TEXT    NOT NULL,
+  from_time     TEXT,                         -- HH:MM للاستئذان
+  to_time       TEXT,
+  days          INTEGER NOT NULL DEFAULT 0,   -- أيام العمل التي يغطيها (بلا العطلة الأسبوعية)
+  reason        TEXT,
+  status        TEXT    NOT NULL DEFAULT 'بانتظار الرد', -- بانتظار الرد | مقبول | مرفوض | ملغى
+  decided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at    TEXT,
+  decision_note TEXT,
+  result_seen_at TEXT,                        -- متى رأى الموظف الرد — يطفئ تنبيهه
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_hrreq_user   ON hr_requests(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_hrreq_status ON hr_requests(status);
+
+-- رصيد الإجازة السنوي لكل موظف — يُستعمل حين يشغّل القسم خيار الرصيد.
+-- من لا صفّ له يأخذ الافتراضي من الإعدادات.
+CREATE TABLE IF NOT EXISTS leave_balances (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  annual_days INTEGER NOT NULL,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+
+-- ---------- المرفقات ----------
+-- جدولٌ واحد لكل ما يُرفق، مفتاحه (نوع الكيان، رقمه) — لا عمود مسار في
+-- جدول آخر. الملف نفسه في القاعدة: لا خدمة تخزين خارجية تُضبط، والنسخة
+-- الاحتياطية تحمله مع بقية البيانات.
+CREATE TABLE IF NOT EXISTS attachments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_kind TEXT    NOT NULL,               -- hr_request
+  entity_id   INTEGER NOT NULL,
+  name        TEXT,
+  mime        TEXT    NOT NULL,
+  size        INTEGER NOT NULL,
+  data        BLOB    NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_files_entity ON attachments(entity_kind, entity_id);
+
+-- ---------- المهام ----------
+-- "متأخرة" لا تُخزَّن: تُحسب من الموعد. والإسناد لغيره لا يعدّل المهمة بل
+-- ينشئ أخرى تشير إليها — فيبقى أن فلاناً اعتذر ولماذا.
+CREATE TABLE IF NOT EXISTS tasks (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  title           TEXT    NOT NULL,
+  body            TEXT,
+  due_at          TEXT    NOT NULL,           -- YYYY-MM-DD HH:MM بتوقيت الرياض
+  assignee_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status          TEXT    NOT NULL DEFAULT 'جديدة', -- جديدة | اطّلع عليها | أُنجزت | اعتذر | أُعيد إسنادها | ملغاة
+  seen_at         TEXT,
+  done_at         TEXT,
+  done_note       TEXT,
+  declined_at     TEXT,
+  decline_reason  TEXT,
+  reassigned_from INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  result_seen_at  TEXT,                       -- متى رأى المُرسِل الرد — يطفئ تنبيهه
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
+
 CREATE INDEX IF NOT EXISTS idx_ref_helper ON referrals(helper_id, status);
 CREATE INDEX IF NOT EXISTS idx_ref_owner  ON referrals(owner_id, status);
 CREATE INDEX IF NOT EXISTS idx_ref_car    ON referrals(car_id, status);
