@@ -985,7 +985,12 @@
       b.querySelector('[data-from-label]').textContent =
         hours ? 'اليوم' : k === 'عذر غياب' ? 'يوم الغياب' : 'من تاريخ';
       el('from_day').max = k === 'عذر غياب' ? todayISO() : '';
+      // مهلة العذر: الأيام قبلها لا تُختار أصلاً — والخادم يرفضها لو أُرسلت
+      el('from_day').min = k === 'عذر غياب' && m.excuse_from ? m.excuse_from : '';
+      if (k === 'عذر غياب' && m.excuse_from && el('from_day').value < m.excuse_from) el('from_day').value = todayISO();
       let hint = REQ_HINT[k] || '';
+      if (k === 'عذر غياب' && m.excuse_days)
+        hint += ` يُقدَّم خلال ${m.excuse_days === 1 ? 'يوم عمل واحد' : m.excuse_days === 2 ? 'يومَي عمل' : num(m.excuse_days) + ' أيام عمل'} من يوم الغياب — أقدم يوم يُقبل الآن: ${dOnly(m.excuse_from)}.`;
       if (k === 'إجازة' && m.my_balance) hint += ` رصيدك المتبقي: ${num(m.my_balance.remaining)} من ${num(m.my_balance.annual)}.`;
       b.querySelector('[data-hint]').textContent = hint;
     };
@@ -1101,13 +1106,18 @@
     const DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
     const b = openModal('إعدادات الطلبات', `
       <form id="rq-set">
-        <p><b>العطلة الأسبوعية</b> <span class="muted">— لا تُحسب من أيام الإجازة، ولا يُكتب فيها حضور</span></p>
+        <p><b>أيام العمل</b> <span class="muted">— حدّد الأيام التي تعملون فيها. غير المحددة عطلة: لا تُحسب من
+          أيام الإجازة، ولا من مهلة عذر الغياب، ولا يُكتب فيها حضور.</span></p>
         <div class="row gap wrap">${DAYS.map((n, i) => `<label class="check">
-          <input type="checkbox" name="wd" value="${i}" ${s.weekend.includes(i) ? 'checked' : ''}> ${n}</label>`).join('')}</div>
+          <input type="checkbox" name="wd" value="${i}" ${s.weekend.includes(i) ? '' : 'checked'}> ${n}</label>`).join('')}</div>
         <label class="check" style="margin-top:1rem"><input type="checkbox" name="bal" ${s.leave_balance ? 'checked' : ''}>
           احسب رصيد الإجازة السنوي لكل موظف</label>
         <label>الرصيد السنوي الافتراضي (يوم)
           <input type="number" name="yearly" min="0" max="90" value="${s.leave_days}" style="max-width:120px"></label>
+        <label style="margin-top:1rem">مهلة عذر الغياب (أيام عمل بعد يوم الغياب)
+          <input type="number" name="excuse" min="1" max="60" value="${s.excuse_days ?? ''}" placeholder="بلا حد" style="max-width:120px">
+          <small class="muted">مثال: ٢ — من غاب يوماً يقدّم عذره خلال يومَي العمل التاليين، وبعدها لا يُقبل.
+            تُعدّ أيام العمل المحددة أعلاه وحدها. اتركها فارغة بلا حد.</small></label>
         <div class="modal-actions"><button class="btn primary">حفظ الإعدادات</button></div>
       </form>
       <h3 style="margin-top:1.2rem">رصيد كل موظف</h3>
@@ -1125,9 +1135,11 @@
       const f = e.target;
       try {
         await api('/requests/settings', { method: 'PUT', body: {
-          weekend: [...f.querySelectorAll('[name=wd]:checked')].map((x) => +x.value),
+          // تُحفظ العطلة (ما لم يُحدَّد) — والشاشة تعرض أيام العمل لأنها ما يعرفه الناس
+          weekend: [...f.querySelectorAll('[name=wd]:not(:checked)')].map((x) => +x.value),
           leave_balance: f.elements.namedItem('bal').checked,
-          leave_days: f.elements.namedItem('yearly').value } });
+          leave_days: f.elements.namedItem('yearly').value,
+          excuse_days: f.elements.namedItem('excuse').value || null } });
         toast('حُفظت الإعدادات', 'ok');
         REQ_META = null; closeModal(); done?.();
       } catch (ex) { toast(ex.message, 'bad'); }

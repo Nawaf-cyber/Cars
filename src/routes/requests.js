@@ -45,7 +45,10 @@ router.use(M.featureGate('requests'));
 
 /** أيام العطلة (0 الأحد … 6 السبت). الافتراضي الجمعة والسبت. */
 function weekend() {
+  /* «none» = يعملون الأسبوع كله. لا تُحفظ فارغة: الإعداد الفارغ يُقرأ «غير
+     مضبوط» فيعود إلى الجمعة والسبت، وتظهر عطلةٌ لم يطلبها أحد. */
   const raw = String(S.getSetting('hr_weekend', '5,6'));
+  if (raw === 'none') return new Set();
   return new Set(raw.split(',').map((x) => parseInt(x, 10)).filter((n) => n >= 0 && n <= 6));
 }
 
@@ -63,6 +66,35 @@ function workDays(from, to) {
 }
 
 /* ---------- الرصيد ---------- */
+
+/* ---------- مهلة عذر الغياب ----------
+   العذر يُقدَّم خلال عددٍ من أيام العمل بعد يوم الغياب يحدده المدير، وبعدها
+   لا يُقبل. تُعدّ أيام العمل لا أيام التقويم: من غاب الخميس ورجع الأحد لم
+   يمرّ عليه يوم عمل، فلا تأكل العطلةُ مهلته. فارغة = بلا حد. */
+function excuseLimit() {
+  const n = parseInt(S.getSetting('hr_excuse_days', ''), 10);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+/** أيام العمل التي مرّت بعد يومٍ ما حتى اليوم (شاملةً اليوم). */
+function workDaysSince(day, today = U.today()) {
+  if (day >= today) return 0;
+  return workDays(addDay(day, 1), today).length;
+}
+const addDay = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toLocaleDateString('en-CA'); };
+
+/** أقدم يوم غيابٍ ما زال عذره مقبولاً اليوم — لتضعه الواجهة حدّاً للتاريخ. */
+function excuseEarliest(today = U.today()) {
+  const n = excuseLimit();
+  if (n === null) return null;
+  let d = today;
+  for (let i = 0; i < 400; i++) {
+    const prev = addDay(d, -1);
+    if (workDaysSince(prev, today) > n) return d;
+    d = prev;
+  }
+  return d;
+}
 
 const balanceOn = () => S.getSetting('hr_leave_balance', '') === '1';
 const defaultDays = () => parseInt(S.getSetting('hr_leave_days', '21'), 10) || 21;
@@ -104,10 +136,12 @@ router.get('/meta', M.needsAny('hr.requests.raise', 'hr.requests.view'), async (
     kinds: Object.keys(KINDS), statuses: STATUSES,
     balance_on: balanceOn(), weekend: [...weekend()],
     max_file_mb: MAX_FILE / 1024 / 1024,
+    // مهلة عذر الغياب: عددها، وأقدم يومٍ يُقبل عذره اليوم
+    excuse_days: excuseLimit(), excuse_from: excuseEarliest(),
   };
   if (out.balance_on && P.can(req.user, 'hr.requests.raise')) out.my_balance = await balanceOf(req.user.id);
   if (P.can(req.user, 'hr.requests.manage')) out.settings = {
-    leave_balance: balanceOn(), leave_days: defaultDays(), weekend: [...weekend()] };
+    leave_balance: balanceOn(), leave_days: defaultDays(), weekend: [...weekend()], excuse_days: excuseLimit() };
   res.json(out);
 });
 
@@ -188,6 +222,11 @@ router.post('/', M.needsAny('hr.requests.raise'), (req, res, next) => {
   if (!from || !U.isValidDate(from) || !to || !U.isValidDate(to)) return res.status(400).json({ error: 'حدد التاريخ' });
   if (to < from) return res.status(400).json({ error: 'تاريخ النهاية قبل البداية' });
   if (kind === 'عذر غياب' && from > U.today()) return res.status(400).json({ error: 'عذر الغياب ليومٍ مضى — للأيام القادمة قدّم إجازة' });
+  if (kind === 'عذر غياب' && excuseLimit() !== null && workDaysSince(from) > excuseLimit()) {
+    const n = excuseLimit();
+    return res.status(400).json({ error: `انتهت مهلة عذر الغياب: يُقدَّم خلال ${n === 1 ? 'يوم عمل واحد' : n === 2 ? 'يومَي عمل' : n + ' أيام عمل'} من يوم الغياب — تواصل مع الموارد البشرية`,
+      excuse_from: excuseEarliest() });
+  }
 
   let fromTime = null, toTime = null;
   if (KINDS[kind].hours) {
@@ -322,12 +361,26 @@ router.put('/settings', M.needsAny('hr.requests.manage'), async (req, res) => {
   if (b.weekend !== undefined) {
     const w = [...new Set((Array.isArray(b.weekend) ? b.weekend : []).map((x) => parseInt(x, 10)))]
       .filter((n) => n >= 0 && n <= 6);
-    if (w.length > 3) return res.status(400).json({ error: 'العطلة الأسبوعية ثلاثة أيام على الأكثر' });
-    await S.setSetting('hr_weekend', w.join(','));
+    // يوم إجازة واحد أو بلا إجازة جائز — لكن لا أسبوعٌ بلا يوم عمل
+    if (w.length > 6) return res.status(400).json({ error: 'حدّد يوم عمل واحداً على الأقل' });
+    await S.setSetting('hr_weekend', w.length ? w.join(',') : 'none');
+  }
+  if (b.excuse_days !== undefined) {
+    // فارغة = بلا حد
+    if (b.excuse_days === null || b.excuse_days === '') await S.setSetting('hr_excuse_days', '');
+    else {
+      const n = parseInt(b.excuse_days, 10);
+      if (!(n >= 1 && n <= 60)) return res.status(400).json({ error: 'مهلة عذر الغياب بين ١ و٦٠ يوم عمل — أو اتركها فارغة بلا حد' });
+      await S.setSetting('hr_excuse_days', String(n));
+    }
   }
   A.audit(req.user.id, 'إعدادات الطلبات', 'settings', null,
-    { الرصيد: balanceOn() ? 'مشغّل' : 'مطفأ', السنوي: defaultDays(), العطلة: [...weekend()].join(',') });
-  res.json({ ok: true, settings: { leave_balance: balanceOn(), leave_days: defaultDays(), weekend: [...weekend()] } });
+    { الرصيد: balanceOn() ? 'مشغّل' : 'مطفأ', السنوي: defaultDays(),
+      أيام_العمل: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
+        .filter((_, i) => !weekend().has(i)).join('، '),
+      مهلة_العذر: excuseLimit() === null ? 'بلا حد' : excuseLimit() + ' أيام عمل' });
+  res.json({ ok: true, settings: { leave_balance: balanceOn(), leave_days: defaultDays(), weekend: [...weekend()],
+    excuse_days: excuseLimit() } });
 });
 
 // أرصدة الموظفين — لمن يضبطها
