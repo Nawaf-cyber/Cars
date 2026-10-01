@@ -1001,7 +1001,11 @@ router.post('/:id/state', P.needs('cars.set_state'), async (req, res) => {
    السيارات، ويُنبَّه صاحب السيارة. (التراخيص مكتبةٌ عامة: routes/licenses.js)
    ============================================================================= */
 const TRANSPORT_FIELDS = { operating_card: 'بطاقة التشغيل', driver_card: 'بطاقة السائق', gps: 'تفعيل GPS' };
-const yesNo = (v) => (v === null || v === undefined ? null : Number(v) ? 'صح' : 'خطأ');
+// كل خانة بلغتها: البطاقة تُملك أو لا، والـGPS يُفعَّل أو لا
+const TRANSPORT_WORDS = {
+  operating_card: ['يملك', 'لا يملك'], driver_card: ['يملك', 'لا يملك'], gps: ['مفعّل', 'غير مفعّل'],
+};
+const yesNo = (v, k) => (v === null || v === undefined ? null : TRANSPORT_WORDS[k][Number(v) ? 0 : 1]);
 
 router.put('/:id(\\d+)/transport', P.needs('transport.edit'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -1017,7 +1021,7 @@ router.put('/:id(\\d+)/transport', P.needs('transport.edit'), async (req, res) =
   const next = {};
   for (const k of Object.keys(TRANSPORT_FIELDS)) {
     const v = read(b[k]);
-    if (v === 'bad') return res.status(400).json({ error: `قيمة غير مفهومة لـ«${TRANSPORT_FIELDS[k]}» — صح أو خطأ` });
+    if (v === 'bad') return res.status(400).json({ error: `قيمة غير مفهومة لـ«${TRANSPORT_FIELDS[k]}» — ${TRANSPORT_WORDS[k].join(' أو ')}` });
     next[k] = v === undefined ? (cur[k] ?? null) : v;
   }
   await db.prepare(`INSERT INTO car_transport (car_id, operating_card, driver_card, gps, updated_by, updated_at)
@@ -1026,9 +1030,9 @@ router.put('/:id(\\d+)/transport', P.needs('transport.edit'), async (req, res) =
     .run(id, next.operating_card, next.driver_card, next.gps, req.user.id, U.now());
 
   const n = await D.logCarEdit(req.user, car, Object.entries(TRANSPORT_FIELDS)
-    .map(([k, label]) => ({ field: label, old_value: yesNo(cur[k]), new_value: yesNo(next[k]) })));
+    .map(([k, label]) => ({ field: label, old_value: yesNo(cur[k], k), new_value: yesNo(next[k], k) })));
   if (n) A.audit(req.user.id, 'بيانات هيئة النقل', 'cars', id, { plate: car.plate,
-    ...Object.fromEntries(Object.entries(TRANSPORT_FIELDS).map(([k, l]) => [l, yesNo(next[k]) || '—'])) });
+    ...Object.fromEntries(Object.entries(TRANSPORT_FIELDS).map(([k, l]) => [l, yesNo(next[k], k) || '—'])) });
   res.json({ ok: true, transport: next, changed: n });
 });
 

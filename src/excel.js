@@ -28,20 +28,21 @@ const COLUMNS = [
   // بعد المبلغ مباشرة: ما بقي، وما سُدّد — يقرؤهما المحصّل قبل أن يتصل
   { header: 'المتبقي',          key: 'remaining', width: 14, align: 'center', money: true },
   { header: 'إجمالي السدادات',  key: 'paid',      width: 15, align: 'center', money: true },
-  // بيانات هيئة النقل: ✓ صح · ✗ خطأ · — لم تُحدَّد
-  { header: 'بطاقة التشغيل',    key: 'operating_card', width: 13, align: 'center', flag: true },
-  { header: 'بطاقة السائق',     key: 'driver_card',    width: 13, align: 'center', flag: true },
-  { header: 'تفعيل GPS',        key: 'gps',            width: 11, align: 'center', flag: true },
+  // بيانات هيئة النقل: يملك / لا يملك · مفعّل / غير مفعّل · — لم تُحدَّد
+  { header: 'بطاقة التشغيل',    key: 'operating_card', width: 13, align: 'center', flag: ['يملك', 'لا يملك'] },
+  { header: 'بطاقة السائق',     key: 'driver_card',    width: 13, align: 'center', flag: ['يملك', 'لا يملك'] },
+  { header: 'تفعيل GPS',        key: 'gps',            width: 12, align: 'center', flag: ['مفعّل', 'غير مفعّل'] },
   { header: 'النتيجة',     key: 'result',  width: 55, align: 'right' },
 ];
 
 const thin = { style: 'thin', color: { argb: BORDER } };
 const BOX = { top: thin, left: thin, bottom: thin, right: thin };
 
-/** صح / خطأ / لم تُحدَّد — كما تُقرأ بنظرة */
-function flag(v) {
+/** خانة هيئة النقل بكلمتها: يملك / لا يملك، أو مفعّل / غير مفعّل — و«—» إن لم تُحدَّد */
+function flag(v, key) {
   if (v === null || v === undefined) return '—';
-  return Number(v) ? '✓' : '✗';
+  const words = COLUMNS.find((c) => c.key === key).flag;
+  return Number(v) ? words[0] : words[1];
 }
 
 function fill(argb) {
@@ -97,7 +98,7 @@ function addSheet(wb, employeeName, rows) {
       r.amount === null || r.amount === undefined ? 'لا يوجد'
         : Math.round((Number(r.amount) - Number(r.paid || 0)) * 100) / 100,
       Number(r.paid || 0),
-      flag(r.operating_card), flag(r.driver_card), flag(r.gps),
+      flag(r.operating_card, 'operating_card'), flag(r.driver_card, 'driver_card'), flag(r.gps, 'gps'),
       r.result || '',
     ]);
     const bg = needsAttention(r) ? ORANGE : GREEN_LIGHT;
@@ -112,7 +113,7 @@ function addSheet(wb, employeeName, rows) {
       };
       if (c.money && typeof cell.value === 'number') cell.numFmt = '#,##0.00';
       // الصح أخضر والخطأ أحمر — يُقرأ العمود بلونه قبل رمزه
-      if (c.flag) cell.font = { bold: true, color: { argb: cell.value === '✓' ? 'FF2E7D32' : cell.value === '✗' ? 'FFC62828' : 'FF8A8A8A' } };
+      if (c.flag) cell.font = { bold: true, color: { argb: cell.value === c.flag[0] ? 'FF2E7D32' : cell.value === c.flag[1] ? 'FFC62828' : 'FF8A8A8A' } };
     });
   });
 

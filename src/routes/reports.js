@@ -183,7 +183,11 @@ router.get('/audit', P.needs('reports.audit'), async (req, res) => {
   const myRank = P.rankOf(req.user.role);
   const visible = Object.values(P.allRoles())
     .filter((r) => r.rank <= myRank).map((r) => r.key);
-  const where = `WHERE u.id IS NULL OR u.role IN (${visible.map(() => '?').join(',')})`;
+  /* القضايا لا يراها إلا قسم القانون — وسطورها في السجل تحمل عناوينها وأطرافها.
+     فمن لا يرى كل القضايا لا يراها هنا أيضاً. */
+  const legal = P.can(req.user, 'legal.view_all') ? ''
+    : " AND COALESCE(a.entity,'')<>'legal_cases' AND a.action NOT IN ('رفع نموذج قانوني','حذف نموذج قانوني')";
+  const where = `WHERE (u.id IS NULL OR u.role IN (${visible.map(() => '?').join(',')}))${legal}`;
 
   const rows = (await db.prepare(`
     SELECT a.*, u.name AS user_name

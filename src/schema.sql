@@ -487,6 +487,46 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
 
+-- ---------- القانون ----------
+-- القضية يضيفها من يملك الإضافة ويحيلها رئيس القانون لموظفٍ منه. لا رابط
+-- بالسيارات ولا بالسائقين عمداً: للقانون صفحته، والمدعى عليه نصٌّ يُكتب.
+-- ملفات القضية والنماذج في جدول المرفقات (legal_file · legal_form).
+CREATE TABLE IF NOT EXISTS legal_cases (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT    NOT NULL,
+  case_no     TEXT,                            -- رقم القضية في المحكمة
+  plaintiff   TEXT,                            -- المدعي
+  defendant   TEXT,                            -- المدعى عليه
+  court       TEXT,
+  subject     TEXT,                            -- موضوع الدعوى باختصار
+  status      TEXT    NOT NULL DEFAULT 'قائمة', -- قائمة | منتهية | مؤرشفة
+  verdict     TEXT,                            -- الحكم أو ما انتهت إليه
+  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_at TEXT,
+  assignee_seen_at TEXT,                       -- متى فتحها المحال إليه — يطفئ تنبيهه
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours')),
+  updated_at  TEXT,
+  closed_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_legal_cases_assignee ON legal_cases(assigned_to, status);
+
+-- الجلسة لقضيةٍ واحدة، بموعدٍ بالتاريخ والساعة، ونتيجتها تُسجَّل بعد انعقادها
+CREATE TABLE IF NOT EXISTS legal_hearings (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id     INTEGER NOT NULL REFERENCES legal_cases(id) ON DELETE CASCADE,
+  hearing_at  TEXT    NOT NULL,                -- YYYY-MM-DD HH:MM بتوقيت الرياض
+  notes       TEXT,                            -- ما يُنتظر فيها أو مكانها
+  result      TEXT,
+  result_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  result_at   TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now','+3 hours'))
+);
+CREATE INDEX IF NOT EXISTS idx_legal_hearings_case ON legal_hearings(case_id);
+CREATE INDEX IF NOT EXISTS idx_legal_hearings_at   ON legal_hearings(hearing_at);
+
 -- ---------- الأقسام ----------
 -- القسم فريقٌ من الموظفين له رئيس. لا يغيّر صلاحيات أحد بنفسه: الصلاحيات
 -- على المسمّى الوظيفي، والقسم يحدد على من تُطبَّق صلاحيات «رئيس القسم».

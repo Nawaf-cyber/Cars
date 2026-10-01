@@ -43,7 +43,9 @@ router.post('/login', async (req, res) => {
     httpOnly: true,
     sameSite: 'lax',
     secure: req.secure || req.get('x-forwarded-proto') === 'https',  // لا تُرسل إلا عبر HTTPS
-    maxAge: A.SESSION_DAYS * 86400000,
+    /* بلا مدة: كوكي جلسة يمحوه المتصفح حين يُغلق أو يُطفأ الجهاز، فيُطلب
+       الدخول من جديد. وتحديث الصفحة لا يمسّه. والجلسة في الخادم تنتهي
+       بعد SESSION_DAYS على كل حال. */
   });
   res.json({ user: A.publicUser(u) });
 });

@@ -88,6 +88,9 @@ const USER_LINKS = [
   ['car_edits', 'owner_id'], ['car_edits', 'editor_id'],
   // هيئة النقل: من عدّل بيانات المركبة
   ['car_transport', 'updated_by'],
+  // القانون: المحال إليه، ومن أضاف وعدّل، ومن سجّل الجلسة ونتيجتها
+  ['legal_cases', 'assigned_to'], ['legal_cases', 'created_by'], ['legal_cases', 'updated_by'],
+  ['legal_hearings', 'created_by'], ['legal_hearings', 'result_by'],
 ];
 
 /* جداول تشير إلى users بـ ON DELETE CASCADE — أي أن حذف جدول المستخدمين
@@ -558,9 +561,15 @@ async function exportToFile(targetPath) {
   const out = createClient({ url: 'file:' + targetPath.replace(/\\/g, '/') });
 
   try {
-    // ننشئ نفس البنية ثم ننقل الصفوف
+    /* البنية كما هي في القاعدة نفسها لا كما في المخطط. المخطط يحمل قيد الدور
+       القديم على users (الأدوار الخمسة) الذي تفتحه الترقية — فكان أول حسابٍ
+       بمسمّى مخصّص يُسقط التنزيل كله، والنسخة الاحتياطية لا تُنزَّل أصلاً. */
     await out.execute('PRAGMA foreign_keys = OFF');
-    for (const stmt of sql.splitStatements(SCHEMA)) await out.execute(stmt);
+    const defs = await sql.prepare(`SELECT sql FROM sqlite_master
+      WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND type IN ('table','index')
+      ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END`).all();
+    if (defs.length) for (const d of defs) await out.execute(d.sql);
+    else for (const stmt of sql.splitStatements(SCHEMA)) await out.execute(stmt);
 
     const tables = (await sql.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all())

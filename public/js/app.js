@@ -175,10 +175,14 @@ if (!window.__editsTimer) window.__editsTimer = setInterval(() => {
 
 // الأرقام بفواصلها (٥٠٬٠٠٠ لا 50000) — وما سواها نصٌّ كما هو
 const editVal = (v) => (v == null ? '<span class="muted">—</span>' : /^-?\d+(\.\d+)?$/.test(v) ? num(Number(v)) : esc(v));
-/** بطاقة التشغيل وأخواتها: ✓ صح · ✗ خطأ · لم تُحدَّد */
-function flagBadge(v) {
+/* خانات هيئة النقل بكلماتها: البطاقة تُملك أو لا، والـGPS يُفعَّل أو لا */
+const TRANSPORT_WORDS = {
+  operating_card: ['يملك', 'لا يملك'], driver_card: ['يملك', 'لا يملك'], gps: ['مفعّل', 'غير مفعّل'],
+};
+function flagBadge(v, key) {
   if (v === null || v === undefined) return '<span class="muted">لم تُحدَّد</span>';
-  return Number(v) ? '<span class="badge ok">✓ صح</span>' : '<span class="badge bad">✗ خطأ</span>';
+  const [yes, no] = TRANSPORT_WORDS[key];
+  return Number(v) ? `<span class="badge ok">✓ ${yes}</span>` : `<span class="badge bad">✗ ${no}</span>`;
 }
 
 function editsTable(rows, withOwner) {
@@ -282,6 +286,8 @@ async function boot() {
   document.title = (S.settings.company_name || 'نظام') + ' — متابعة التحصيل';
 
   showApp();
+  // الشاشة الأولى — لوحة المؤشرات، ما لم تحدد وحدةٌ محمّلة غيرها لصاحبها
+  S.home = 'dashboard';
   // بعض المستخدمين لهم واجهة إضافية يقرّرها الخادم ويقدّمها من مسار محمي
   if (S.user.extra_ui) await loadExtraUI();
   else purgeExtraUI();   // مستخدم بلا هذه الواجهة: انزع ما حقنه من سبقه
@@ -302,7 +308,7 @@ async function boot() {
   await loadHelpers();     // زملاء التواصل المعتمدون لي — للإحالة الجماعية
   $('#dash-from').value = $('#perf-from').value = monthStart();
   $('#dash-to').value = $('#perf-to').value = todayISO();
-  switchTab('dashboard');
+  switchTab(LOADERS[S.home] ? S.home : 'dashboard');
 }
 
 /**
@@ -982,9 +988,9 @@ function renderCar(b, d) {
       ${c.car_state ? dcell('حالة السيارة', `<span class="badge">${esc(c.car_state)}</span>`) : ''}
       ${dcell('الموظف المسؤول', esc(c.assigned_name || 'غير مسندة'))}
       ${dcell('أضافها', esc(c.added_by_name || '—') + (c.source === 'استيراد' ? ' (استيراد)' : ''))}
-      ${dcell('بطاقة التشغيل', flagBadge(T.operating_card))}
-      ${dcell('بطاقة السائق', flagBadge(T.driver_card))}
-      ${dcell('تفعيل GPS', flagBadge(T.gps))}
+      ${dcell('بطاقة التشغيل', flagBadge(T.operating_card, 'operating_card'))}
+      ${dcell('بطاقة السائق', flagBadge(T.driver_card, 'driver_card'))}
+      ${dcell('تفعيل GPS', flagBadge(T.gps, 'gps'))}
     </div>
     <div class="bar ${progress >= 100 ? 'ok' : progress > 50 ? '' : 'warn'}" style="margin-bottom:1rem">
       <i style="width:${progress}%"></i>
@@ -1123,8 +1129,8 @@ function renderCar(b, d) {
   if (tr) {
     const ynSel = (name, v) => `<select name="${name}">
       <option value="" ${v == null ? 'selected' : ''}>— لم تُحدَّد —</option>
-      <option value="1" ${v === 1 ? 'selected' : ''}>✓ صح</option>
-      <option value="0" ${v === 0 ? 'selected' : ''}>✗ خطأ</option></select>`;
+      <option value="1" ${v === 1 ? 'selected' : ''}>✓ ${TRANSPORT_WORDS[name][0]}</option>
+      <option value="0" ${v === 0 ? 'selected' : ''}>✗ ${TRANSPORT_WORDS[name][1]}</option></select>`;
     tr.innerHTML = `<form id="tr-form" class="panel" style="background:#f8fafd">
       <h3 style="margin-bottom:.6rem">بيانات هيئة النقل</h3>
       <div class="form-grid">

@@ -130,7 +130,10 @@ function publicUser(u) {
     extra_ui: u.role === 'owner',            // هل نحمّل واجهة إضافية خاصة بهذا المستخدم
     /* وحداتٌ تُحمَّل من الخادم بأسماء محايدة — فلا يظهر في مصدر الصفحة ما
        هي ولا ما تفعل. القائمة فارغة لمن لم يُكشف له قسم. */
-    ui_modules: require('./modules').wantsDeptsUI(u) ? ['depts'] : [],
+    ui_modules: [
+      ...(require('./modules').wantsDeptsUI(u) ? ['depts'] : []),
+      ...(require('./modules').wantsLegalUI(u) ? ['legal'] : []),
+    ],
   };
 }
 

@@ -46,9 +46,14 @@ async function people() {
   }));
 }
 
-/** هل يحق لهذا المستخدم أن تُحمَّل له واجهة الأقسام؟ */
+/** هل يحق لهذا المستخدم أن تُحمَّل له واجهة الأقسام؟ القانون له واجهته. */
 function wantsDeptsUI(user) {
-  return Object.keys(P.FEATURE_OF).some((c) => P.can(user, c));
+  return Object.keys(P.FEATURE_OF).some((c) => P.MODULE_OF[c] !== 'legal' && P.can(user, c));
 }
 
-module.exports = { featureGate, needsAny, people, wantsDeptsUI, NOT_FOUND };
+/** واجهة القانون — لمن دخل القسم وحده. */
+function wantsLegalUI(user) {
+  return P.can(user, 'legal.access');
+}
+
+module.exports = { featureGate, needsAny, people, wantsDeptsUI, wantsLegalUI, NOT_FOUND };

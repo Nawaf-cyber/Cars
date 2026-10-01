@@ -292,6 +292,15 @@ app.get('/api/ui/depts.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'private', 'depts-ui.js'));
 });
 
+// واجهة القانون — بالقاعدة نفسها: لمن دخل القسم وحده، ولغيره لا وجود لها
+app.get('/api/ui/legal.js', (req, res) => {
+  if (!req.user || !require('./src/modules').wantsLegalUI(req.user))
+    return res.status(404).json({ error: 'المسار غير موجود' });
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'private', 'legal-ui.js'));
+});
+
 // ---------- حالة الاشتراك (متاحة دائماً حتى للعميل الموقوف) ----------
 app.get('/api/license/status', A.requireAuth, (req, res) => {
   const st = LIC.evaluate();
@@ -319,6 +328,7 @@ app.use('/api/hr', require('./src/routes/hr'));
 app.use('/api/it', require('./src/routes/it'));
 app.use('/api/requests', require('./src/routes/requests'));
 app.use('/api/tasks', require('./src/routes/tasks'));
+app.use('/api/legal', require('./src/routes/legal'));
 app.use('/api/departments', require('./src/routes/departments'));
 app.use('/api/licenses', require('./src/routes/licenses'));
 app.use('/api/admin', require('./src/routes/admin'));

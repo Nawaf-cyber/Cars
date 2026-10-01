@@ -157,6 +157,21 @@ const CAPABILITIES = [
   { key: 'tasks.assign',   group: 'المهام', feature: 'assign',   label: 'إرسال المهام لأي موظف ومتابعتها وإسنادها لغيره' },
   { key: 'overview.view',  group: 'المهام', feature: 'overview', label: 'لوحة الموظفين — ملخص كل موظف (اطلاع فقط)' },
 
+  /* القانون — كل إجراءٍ مفتاحٌ مستقل، يوزّعها المدير بين الرئيس والموظف كما
+     تعمل الشركة فعلاً. «الدخول» أساسُها كلها: من لا يدخل القسم لا يعدّل فيه.
+     ولا يرى القضايا إلا قسم القانون — لا مفتاحَ منها في أي دورٍ آخر. */
+  { key: 'legal.access',          group: 'القانون', feature: 'legal', label: 'القانون — دخول القسم: القضايا المحالة إليه وجلساتها، والنماذج' },
+  { key: 'legal.view_all',        group: 'القانون', feature: 'legal', label: 'القانون — رؤية كل القضايا وجلساتها', requires: 'legal.access' },
+  { key: 'legal.cases.create',    group: 'القانون', feature: 'legal', label: 'القانون — إضافة القضايا', requires: 'legal.access' },
+  // الحذف يمحو القضية بجلساتها وملفاتها — مفتاحٌ وحده، لا يأتي مع الإضافة
+  { key: 'legal.cases.delete',    group: 'القانون', feature: 'legal', label: 'القانون — حذف القضية بجلساتها وملفاتها', requires: 'legal.access' },
+  { key: 'legal.cases.edit',      group: 'القانون', feature: 'legal', label: 'القانون — تعديل بيانات القضية وحالتها والحكم', requires: 'legal.access' },
+  { key: 'legal.assign',          group: 'القانون', feature: 'legal', label: 'القانون — إحالة القضايا إلى موظفي القانون', requires: 'legal.access' },
+  { key: 'legal.hearings.manage', group: 'القانون', feature: 'legal', label: 'القانون — إضافة الجلسات وتعديل مواعيدها وحذفها', requires: 'legal.access' },
+  { key: 'legal.hearings.result', group: 'القانون', feature: 'legal', label: 'القانون — تسجيل نتيجة الجلسة', requires: 'legal.access' },
+  { key: 'legal.files.manage',    group: 'القانون', feature: 'legal', label: 'القانون — إرفاق ملفات القضية (PDF · Word) وتسميتها وحذفها', requires: 'legal.access' },
+  { key: 'legal.forms.manage',    group: 'القانون', feature: 'legal', label: 'القانون — رفع النماذج (PDF · Word) وتسميتها وحذفها', requires: 'legal.access' },
+
   { key: 'it.assets.view',     group: 'تقنية المعلومات', feature: 'assets',   label: 'العُهد — رؤية الأجهزة وسجلها وضماناتها' },
   { key: 'it.assets.manage',   group: 'تقنية المعلومات', feature: 'assets',   label: 'العُهد — إضافة الأجهزة وتسليمها واستلامها', requires: 'it.assets.view' },
   { key: 'it.mine',            group: 'تقنية المعلومات', feature: 'mine',     label: 'عُهدتي — رؤية الأجهزة التي بيده' },
@@ -178,7 +193,7 @@ const PLAN_CAPS = new Set(CAPABILITIES.filter((c) => c.plan).map((c) => c.key));
    تظهر فارغة؛ ومعالجة الطلبات بلا رفعها لا يصلها طلب. فالتابعة لا تعمل
    إلا مع أمّها، وإخفاء الأم يُخفيها معها.
    ============================================================================= */
-const MODULES = { hr: 'الموارد البشرية', it: 'تقنية المعلومات', tasks: 'المهام' };
+const MODULES = { hr: 'الموارد البشرية', it: 'تقنية المعلومات', tasks: 'المهام', legal: 'القانون' };
 const FEATURES = {
   emp_docs:   { module: 'hr', label: 'وثائق الموظفين' },
   car_docs:   { module: 'hr', label: 'وثائق السيارات' },
@@ -193,6 +208,7 @@ const FEATURES = {
   tasks:      { module: 'tasks', label: 'استلام المهام' },
   assign:     { module: 'tasks', label: 'إرسال المهام ومتابعتها', parent: 'tasks' },
   overview:   { module: 'tasks', label: 'لوحة الموظفين' },
+  legal:      { module: 'legal', label: 'القضايا والجلسات والنماذج' },
 };
 const FEATURE_OF = Object.fromEntries(CAPABILITIES.filter((c) => c.feature).map((c) => [c.key, c.feature]));
 const MODULE_OF = Object.fromEntries(Object.entries(FEATURE_OF).map(([k, f]) => [k, FEATURES[f].module]));
