@@ -84,7 +84,7 @@
   const main = document.querySelector('main');
 
   if (canHR) {
-    tabs.insertAdjacentHTML('beforeend', '<button data-tab="hr" data-ui-module>الموارد البشرية</button>');
+    tabs.insertAdjacentHTML('beforeend', '<button data-tab="hr" data-icon="briefcase" data-ui-module>الموارد البشرية</button>');
     main.insertAdjacentHTML('beforeend', `
       <section id="tab-hr" class="tab-panel hidden" data-ui-module>
         <h2>الموارد البشرية</h2>
@@ -93,7 +93,7 @@
       </section>`);
   }
   if (canIT) {
-    tabs.insertAdjacentHTML('beforeend', '<button data-tab="it" data-ui-module>تقنية المعلومات</button>');
+    tabs.insertAdjacentHTML('beforeend', '<button data-tab="it" data-icon="monitor" data-ui-module>تقنية المعلومات</button>');
     main.insertAdjacentHTML('beforeend', `
       <section id="tab-it" class="tab-panel hidden" data-ui-module>
         <h2>تقنية المعلومات</h2>
@@ -103,7 +103,7 @@
   }
 
   if (canTasks) {
-    tabs.insertAdjacentHTML('beforeend', '<button data-tab="tasks" data-ui-module>المهام</button>');
+    tabs.insertAdjacentHTML('beforeend', '<button data-tab="tasks" data-icon="checklist" data-ui-module>المهام</button>');
     main.insertAdjacentHTML('beforeend', `
       <section id="tab-tasks" class="tab-panel hidden" data-ui-module>
         <h2>المهام</h2>

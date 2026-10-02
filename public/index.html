@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>نظام متابعة تحصيل السيارات</title>
-<link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="icon" href="/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#0f5ea8">
+<meta name="theme-color" content="#0a1872">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="تحصيل السيارات">
@@ -18,7 +18,7 @@
 <!-- ============ شاشة الدخول ============ -->
 <div id="login-screen" class="login-wrap hidden">
   <form class="login-card" id="login-form">
-    <div class="login-logo">🚗</div>
+    <div class="login-logo"><img src="/logo.png" alt=""></div>
     <h1 id="login-title">نظام متابعة تحصيل السيارات</h1>
     <p class="muted">سجّل الدخول للمتابعة</p>
     <label>اسم المستخدم
@@ -38,7 +38,9 @@
 <!-- ============ التطبيق ============ -->
 <div id="app" class="hidden">
   <header class="topbar">
-    <div class="brand"><span>🚗</span><b id="brand-name">نظام متابعة التحصيل</b></div>
+    <div class="brand"><img src="/logo.png" alt=""><b id="brand-name">نظام متابعة التحصيل</b></div>
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-label="القائمة"><span></span><span></span><span></span></button>
+    <div class="nav-panel" id="nav-panel">
     <nav class="tabs" id="tabs">
       <button data-tab="dashboard" class="active">لوحة المؤشرات</button>
       <button data-tab="cars">السيارات</button>
@@ -52,13 +54,17 @@
       <button data-tab="licenses">التراخيص</button>
     </nav>
     <div class="user-box">
-      <span id="user-name"></span>
-      <span class="badge" id="user-role"></span>
-      <button class="btn ghost sm hidden" id="btn-install">تثبيت كبرنامج</button>
-      <button class="btn ghost sm" id="btn-password">كلمة المرور</button>
-      <button class="btn ghost sm" id="btn-logout">خروج</button>
+      <div class="head-of hidden" id="user-head"></div>
+      <div class="who"><b id="user-name"></b><span class="badge" id="user-role"></span></div>
+      <div class="acts">
+        <button class="btn ghost sm hidden" id="btn-install">تثبيت كبرنامج</button>
+        <button class="btn ghost sm" id="btn-password">كلمة المرور</button>
+        <button class="btn ghost sm" id="btn-logout">خروج</button>
+      </div>
+    </div>
     </div>
   </header>
+  <div class="nav-shade" id="nav-shade"></div>
 
   <main>
     <!-- تنبيه صاحب السيارة: عُدّلت بيانات سيارته بيد غيره -->
@@ -113,13 +119,14 @@
         <button class="btn primary sm" id="bulk-assign" data-cap="cars.assign">إسناد المحدد</button>
         <select id="bulk-helper" data-cap="referrals.request"><option value="">— زميل التواصل —</option></select>
         <button class="btn sm" id="bulk-refer" data-cap="referrals.request">أحِل للتواصل</button>
+        <button class="btn danger sm" id="bulk-delete" data-cap="cars.delete">حذف المحدد</button>
         <button class="btn ghost sm" id="bulk-clear">إلغاء التحديد</button>
       </div>
 
       <div class="table-wrap">
         <table class="data" id="cars-table">
           <thead><tr>
-            <th class="chk" data-cap="cars.assign|referrals.request"><input type="checkbox" id="chk-all"></th>
+            <th class="chk" data-cap="cars.assign|referrals.request|cars.delete"><input type="checkbox" id="chk-all"></th>
             <th data-sort="plate">رقم اللوحة</th>
             <th>النوع</th>
             <th data-sort="driver">السائق</th>

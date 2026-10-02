@@ -147,6 +147,11 @@ function showApp() {
   $('#app').classList.remove('hidden');
   $('#user-name').textContent = S.user.name;
   $('#user-role').textContent = S.user.role_label || '';
+  /* رئيس القسم يرى ذلك فوق اسمه — المسمّى وحده («موظف») لا يقوله.
+     «قسم التحصيل» لا تصير «رئيس قسم قسم التحصيل». */
+  const heads = (S.user.head_of || []).map((n) => String(n).replace(/^قسم\s+/, ''));
+  $('#user-head').textContent = heads.length ? 'رئيس قسم ' + heads.join(' · ') : '';
+  $('#user-head').classList.toggle('hidden', !heads.length);
   const mgr = isMgr();
   // رئيس القسم ليس صلاحيةً تُمنح بل تعيينٌ في قسم — يُضاف هنا ليُظهر ما يخصّه
   if (S.user.heads) S.user.caps['dept.head'] = 1;
@@ -242,6 +247,7 @@ $('#login-form').onsubmit = async (e) => {
       body: { username: fd.get('username'), password: fd.get('password') },
     });
     S.user = r.user;
+    markTab();   // هذا التبويب دخل — يبقى داخلاً ما دام مفتوحاً
     await boot();
   } catch (ex) {
     err.textContent = ex.message;
@@ -252,6 +258,7 @@ $('#login-form').onsubmit = async (e) => {
 $('#btn-logout').onclick = async () => {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
   S.user = null;
+  markTab(false);
   // إعادة تحميل كاملة: لا يبقى في الذاكرة ولا في الصفحة أثرٌ لمن خرج
   location.reload();
 };
@@ -308,6 +315,7 @@ async function boot() {
   await loadHelpers();     // زملاء التواصل المعتمدون لي — للإحالة الجماعية
   $('#dash-from').value = $('#perf-from').value = monthStart();
   $('#dash-to').value = $('#perf-to').value = todayISO();
+  arrangeNav();
   switchTab(LOADERS[S.home] ? S.home : 'dashboard');
 }
 
@@ -392,7 +400,70 @@ function switchTab(name) {
   document.body.classList.remove('has-save-bar');   // الشريط يغيب مع قسمه، فلا ترتفع التنبيهات فوق فراغ
   LOADERS[name]?.();
 }
-$('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) switchTab(b.dataset.tab); };
+$('#tabs').onclick = (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  switchTab(b.dataset.tab);
+  document.body.classList.remove('nav-open');   // على الجوال: اختيارُ قسمٍ يُغلق القائمة
+};
+$('#nav-toggle').onclick = () => document.body.classList.toggle('nav-open');
+$('#nav-shade').onclick = () => document.body.classList.remove('nav-open');
+
+/* ---------------- القائمة الجانبية: أيقونات ومجموعات ----------------
+   الأيقونة بمفتاح التبويب، أو بـ data-icon يضعه من يحقن تبويبه — بأسماء
+   أيقوناتٍ عامة، فلا يُذكر هنا قسمٌ لم يُكشف. وما لا تعرفه المجموعتان
+   الأوليان يقع في «الأقسام». */
+const ICON_PATHS = {
+  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  cars: '<path d="M5 17h14v-5l-2-5H7l-2 5z"/><path d="M5 12h14"/><circle cx="8" cy="17" r="2"/><circle cx="16" cy="17" r="2"/>',
+  performance: '<path d="M3 21h18"/><path d="M6 17v-6"/><path d="M11 17V6"/><path d="M16 17v-4"/><path d="M21 17V9"/>',
+  employees: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-6 6.5-6s5.9 2.4 6.5 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14c2 .7 3.3 2.9 3.6 6"/>',
+  salaries: '<rect x="2.5" y="6" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/><path d="M16 14.5h2"/>',
+  import: '<path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  permissions: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+  integrations: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  licenses: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
+  scale: '<path d="M12 3v18"/><path d="M7 21h10"/><path d="M5 7h14"/><path d="M5 7l-3 7a3.5 3.5 0 0 0 6 0z"/><path d="M19 7l-3 7a3.5 3.5 0 0 0 6 0z"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  checklist: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.3 1.3L7.5 4.5M3.5 12l1.3 1.3 2.7-2.8M3.5 18l1.3 1.3 2.7-2.8"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  dot: '<circle cx="12" cy="12" r="3.5"/>',
+};
+const NAV_GROUPS = [
+  ['التحصيل', ['dashboard', 'cars', 'performance', 'import']],
+  ['الإدارة', ['employees', 'salaries', 'permissions', 'settings', 'integrations']],
+];
+
+function navIcon(b) {
+  const d = ICON_PATHS[b.dataset.icon] || ICON_PATHS[b.dataset.tab] || ICON_PATHS.dot;
+  return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+
+/** يرتّب التبويبات في مجموعات بعناوين، ويُخفي المجموعة التي لا يظهر منها شيء.
+    يُعاد كل دخول: ما حقنته وحداتُ مستخدمٍ سابق نُزع، وما يخصّ الجديد أُضيف. */
+function arrangeNav() {
+  const nav = $('#tabs');
+  const btns = $$('#tabs button');
+  nav.innerHTML = '';
+  const known = new Set(NAV_GROUPS.flatMap(([, keys]) => keys));
+  const groups = [...NAV_GROUPS.map(([label, keys]) => [label, btns.filter((b) => keys.includes(b.dataset.tab))]),
+                  ['الأقسام', btns.filter((b) => !known.has(b.dataset.tab))]];
+  for (const [label, list] of groups) {
+    if (!list.length) continue;
+    const g = document.createElement('div');
+    g.className = 'nav-group';
+    g.innerHTML = `<div class="nav-group-label">${esc(label)}</div>`;
+    for (const b of list) {
+      if (!b.querySelector('.ico')) b.insertAdjacentHTML('afterbegin', navIcon(b));
+      g.appendChild(b);
+    }
+    nav.appendChild(g);
+    g.classList.toggle('hidden', list.every((b) => getComputedStyle(b).display === 'none'));
+  }
+}
 
 /* ============================================================
    لوحة المؤشرات
@@ -507,8 +578,8 @@ async function loadCars() {
   catch (e) { tb.innerHTML = `<tr><td colspan="14" class="empty">${esc(e.message)}</td></tr>`; return; }
 
   Object.assign(S.cars, { total: d.total, pages: d.pages });
-  // خانة التحديد تلزم للإسناد وللإحالة معاً — أيّهما مُنح كفى
-  const canAssign = cap('cars.assign') || cap('referrals.request');
+  // خانة التحديد تلزم للإسناد وللإحالة وللحذف الجماعي — أيّها مُنح كفى
+  const canAssign = cap('cars.assign') || cap('referrals.request') || cap('cars.delete');
   const showArrears = cap('charges.view');
   const canState = cap('cars.set_state');
   const cols = 12 + (canAssign ? 1 : 0) + (showArrears ? 1 : 0);
@@ -595,7 +666,7 @@ async function loadCars() {
 
 function renderBulk() {
   const bar = $('#bulk-bar');
-  const may = cap('cars.assign') || cap('referrals.request');
+  const may = cap('cars.assign') || cap('referrals.request') || cap('cars.delete');
   if (!may || !S.selected.size) return bar.classList.add('hidden');
   bar.classList.remove('hidden');
   $('#bulk-count').textContent = `${S.selected.size} سيارة محددة`;
@@ -605,6 +676,26 @@ if (chkAll) chkAll.onchange = () => {
   $$('#cars-body [data-pick]').forEach((cb) => { cb.checked = chkAll.checked; cb.dispatchEvent(new Event('change')); });
 };
 $('#bulk-clear').onclick = () => { S.selected.clear(); loadCars(); };
+/* حذف المحدد: الخادم يقرّر لكل سيارة كما في الحذف المفرد — بلا تاريخٍ
+   تُحذف، وما عليه متابعات أو دفعات يُؤرشف ويُسترجع من «المؤرشفة». */
+$('#bulk-delete').onclick = () => {
+  const count = S.selected.size;
+  if (!count) return;
+  confirmBox(`حذف ${count === 1 ? 'السيارة المحددة' : num(count) + ' سيارة محددة'}؟ ` +
+    'ما ليس عليه متابعات ولا دفعات يُحذف نهائياً، وما عليه شيء يُؤرشف ولا يُحذف — يختفي من القوائم ويُسترجع من «المؤرشفة».', async () => {
+    try {
+      const r = await api('/cars/bulk-delete', { method: 'POST', body: { car_ids: [...S.selected] } });
+      const parts = [];
+      if (r.deleted) parts.push(`حُذفت ${num(r.deleted)}`);
+      if (r.archived) parts.push(`أُرشفت ${num(r.archived)}`);
+      if (r.skipped) parts.push(`تُخطّيت ${num(r.skipped)} (مؤرشفة أصلاً)`);
+      toast(parts.join(' · ') || 'لم يتغيّر شيء', 'ok');
+      S.selected.clear();
+      if (isMgr()) await loadEmployees();
+      loadCars();
+    } catch (e) { toast(e.message, 'bad'); }
+  });
+};
 $('#bulk-assign').onclick = async () => {
   const v = $('#bulk-emp').value;
   if (v === '') return toast('اختر موظفاً أولاً', 'warn');
@@ -2260,7 +2351,8 @@ async function loadBatches() {
     <td class="num">${num(x.rows_inserted)}</td><td class="num">${num(x.rows_updated)}</td>
     <td class="num">${num(x.rows_skipped)}</td><td>${esc(x.created_by_name || '—')}</td>
     <td>${dt(x.created_at)}</td>
-    <td>${x.cars_now > 0 ? `<button class="btn sm danger" data-undo="${x.id}">تراجع (${x.cars_now})</button>` : '<span class="muted">—</span>'}</td>
+    <td>${x.id === d.latest_id && x.cars_now > 0
+      ? `<button class="btn sm danger" data-undo="${x.id}">تراجع (${x.cars_now})</button>` : '<span class="muted">—</span>'}</td>
   </tr>`).join('') || '<tr><td colspan="9" class="empty">لا توجد عمليات استيراد</td></tr>';
 
   $$('#batches-body [data-undo]').forEach((b) => b.onclick = () =>
@@ -3151,9 +3243,45 @@ $('#btn-install').onclick = async () => {
 /* ============================================================
    البداية
    ============================================================ */
+/* ---------------- الخروج حين تُغلق الصفحة ----------------
+   كل تبويبٍ دخل يحمل علامةً في sessionStorage — يمحوها المتصفح حين يُغلق
+   التبويب، ويُبقيها مع «تحديث». فالصفحة التي تُفتح بلا علامة: إما أن صاحبها
+   أغلقها (أو أطفأ جهازه) ثم عاد، وإما أنه فتح تبويباً ثانياً بجانب تبويبٍ
+   مفتوح. يُسأل التبويب المفتوح؛ فإن لم يُجب أحدٌ أُنهيت الجلسة من الخادم
+   نفسه، ولا يعود إليها أحد ولو بقي الكوكي. بلا مهلة ولا عدّاد. */
+const TAB_MARK = 'tab-signed-in';
+const tabChannel = 'BroadcastChannel' in window ? new BroadcastChannel('tab-session') : null;
+function markTab(on = true) {
+  try { on ? sessionStorage.setItem(TAB_MARK, '1') : sessionStorage.removeItem(TAB_MARK); } catch { /* تخزين محجوب */ }
+}
+function tabMarked() {
+  // متصفحٌ يحجب التخزين: لا نُخرج صاحبه في كل فتحة
+  try { return sessionStorage.getItem(TAB_MARK) === '1'; } catch { return true; }
+}
+if (tabChannel) tabChannel.onmessage = (e) => {
+  if (e.data === 'anyone-open?' && S.user && tabMarked()) tabChannel.postMessage('open');
+};
+/** هل في هذا المتصفح تبويبٌ آخر مفتوح وصاحبه داخل؟ */
+function otherTabOpen() {
+  if (!tabChannel) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const done = (v) => { tabChannel.removeEventListener('message', hear); resolve(v); };
+    const hear = (e) => { if (e.data === 'open') done(true); };
+    tabChannel.addEventListener('message', hear);
+    tabChannel.postMessage('anyone-open?');
+    setTimeout(() => done(false), 400);
+  });
+}
+
 (async function init() {
   try {
     const r = await api('/auth/me');
+    if (!tabMarked() && !(await otherTabOpen())) {
+      // أُغلقت الصفحة أو طُفئ الجهاز منذ آخر دخول: الجلسة تنتهي، لا تُستأنف
+      await api('/auth/logout', { method: 'POST' }).catch(() => {});
+      return showLogin();
+    }
+    markTab();
     S.user = r.user;
     await boot();
   } catch {

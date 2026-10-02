@@ -481,14 +481,33 @@ router.get('/batches', P.needs('cars.import'), async (req, res) => {
            (SELECT COUNT(*) FROM cars c WHERE c.batch_id = b.id) AS cars_now
     FROM import_batches b LEFT JOIN users u ON u.id = b.created_by
     WHERE ${where} ORDER BY b.id DESC LIMIT 50`).all(...params));
-  res.json({ batches: rows });
+  for (const r of rows) r.filename = repairName(r.filename);
+  res.json({ batches: rows, latest_id: await latestBatchId() });
 });
+
+/* أسماء ملفات حُفظت قبل إصلاح الرفع مشوّهة («Ø²Ø§Ø…»): بايتات UTF-8 قُرئت
+   حرفاً حرفاً. تُصلَح عند العرض لا في القاعدة — فلا يُكتب في سجلٍّ قديم شيء. */
+function repairName(s) {
+  if (!s || !/[À-ÿ][\u0080-¿]/.test(s) || /[^\u0000-ÿ]/.test(s)) return s;
+  const fixed = Buffer.from(s, 'latin1').toString('utf8');
+  return fixed.includes('�') ? s : fixed;
+}
+
+/* التراجع للعملية الأخيرة وحدها. ما بعدها من استيراد قد يكون عدّل السيارات
+   نفسها أو بنى عليها، فالتراجع عن عمليةٍ أقدم يحذف ما لم يعد يخصّها وحدها.
+   وبعد التراجع عن الأخيرة تصير التي قبلها هي الأخيرة — كالتراجع خطوةً خطوة. */
+async function latestBatchId() {
+  const r = await db.prepare('SELECT MAX(id) AS id FROM import_batches').get();
+  return r?.id ? Number(r.id) : null;
+}
 
 // التراجع عن استيراد (يحذف السيارات التي أُضيفت في تلك العملية فقط)
 router.delete('/batches/:id', P.needs('cars.import'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const batch = (await db.prepare('SELECT * FROM import_batches WHERE id=?').get(id));
   if (!batch) return res.status(404).json({ error: 'العملية غير موجودة' });
+  if (id !== await latestBatchId())
+    return res.status(400).json({ error: 'التراجع لآخر عملية استيراد فقط — جاء بعد هذه استيرادٌ آخر' });
   const withPayments = (await db.prepare('SELECT COUNT(*) n FROM payments p JOIN cars c ON c.id=p.car_id WHERE c.batch_id=?').get(id)).n;
   if (withPayments > 0)
     return res.status(400).json({ error: `لا يمكن التراجع: توجد ${withPayments} دفعة مسجّلة على سيارات هذه العملية` });

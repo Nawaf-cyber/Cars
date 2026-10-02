@@ -13,7 +13,7 @@
   (function injectPanel() {
     document.querySelector('#tabs')
       .insertAdjacentHTML('beforeend',
-        '<button data-tab="owner" data-owner-ui>الاشتراك</button>');
+        '<button data-tab="owner" data-icon="star" data-owner-ui>الاشتراك</button>');
 
     document.querySelector('main').insertAdjacentHTML('beforeend', `
       <section id="tab-owner" class="tab-panel hidden" data-owner-ui>

@@ -8,8 +8,8 @@
    السبب أن الهيكل (HTML/CSS/JS) يتغيّر عند النشر فقط، فانتظار الشبكة في كل
    فتحة يكلّف ثانية كاملة بلا فائدة — خصوصاً على جوّال بشبكة ضعيفة.
    التحديث يصل مع الفتحة التالية، وهذا مقبول لأن البيانات ليست هنا. */
-const CACHE = 'shell-v2';
-const SHELL = ['/', '/index.html', '/css/app.css', '/js/app.js', '/manifest.json', '/icon.svg'];
+const CACHE = 'shell-v3';   // تُرفع مع كل تغيير في الهيكل — فيُحذف المخزَّن القديم
+const SHELL = ['/', '/index.html', '/css/app.css', '/js/app.js', '/manifest.json', '/logo.png', '/favicon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

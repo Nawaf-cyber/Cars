@@ -438,10 +438,32 @@ router.put('/:id', A.requireAuth, async (req, res) => {
  * والحذف النهائي باقٍ لخطأ الإدخال الذي لم يُبنَ عليه شيء.
  */
 router.delete('/:id', P.needs('cars.delete'), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const r = await removeCar(req.user, parseInt(req.params.id, 10), req.body?.reason);
+  if (r.error) return res.status(r.status).json({ error: r.error });
+  res.json({ ok: true, ...r });
+});
+
+/* حذفٌ جماعي للمحدَّد — بالقاعدة نفسها سيارةً سيارة: ما لا تاريخ له يُحذف،
+   وما بُني عليه شيء يُؤرشف ويُسترجع. والمؤرشفة أصلاً تُتخطّى. */
+router.post('/bulk-delete', P.needs('cars.delete'), async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.car_ids) ? req.body.car_ids : []).map(Number).filter(Boolean))];
+  if (!ids.length) return res.status(400).json({ error: 'لم تحدد أي سيارة' });
+  if (ids.length > 500) return res.status(400).json({ error: 'خمسمئة سيارة في المرة الواحدة على الأكثر' });
+  const out = { deleted: 0, archived: 0, skipped: 0 };
+  for (const id of ids) {
+    const r = await removeCar(req.user, id, req.body?.reason);
+    if (r.deleted) out.deleted++; else if (r.archived) out.archived++; else out.skipped++;
+  }
+  A.audit(req.user.id, 'حذف سيارات محددة', 'cars', null,
+    { المحدد: ids.length, حُذفت: out.deleted, أُرشفت: out.archived, تُخطّيت: out.skipped });
+  res.json({ ok: true, ...out });
+});
+
+/** يحذف السيارة إن لم يُبنَ عليها شيء، وإلا يؤرشفها. يرجع ما حدث أو سبب الرفض. */
+async function removeCar(user, id, rawReason) {
   const car = (await db.prepare('SELECT * FROM cars WHERE id=?').get(id));
-  if (!car) return res.status(404).json({ error: 'السيارة غير موجودة' });
-  if (car.archived_at) return res.status(400).json({ error: 'السيارة مؤرشفة أصلاً' });
+  if (!car) return { status: 404, error: 'السيارة غير موجودة' };
+  if (car.archived_at) return { status: 400, error: 'السيارة مؤرشفة أصلاً' };
 
   const n = async (q) => Number((await db.prepare(q).get(id)).n);
   const history = {
@@ -457,22 +479,22 @@ router.delete('/:id', P.needs('cars.delete'), async (req, res) => {
 
   if (!hasHistory) {
     (await db.prepare('DELETE FROM cars WHERE id=?').run(id));
-    A.audit(req.user.id, 'حذف سيارة', 'cars', id, { plate: car.plate, السبب: 'بلا تاريخ' });
-    return res.json({ ok: true, deleted: true });
+    A.audit(user.id, 'حذف سيارة', 'cars', id, { plate: car.plate, السبب: 'بلا تاريخ' });
+    return { deleted: true };
   }
 
   const now = U.now();
-  const reason = String(req.body?.reason || '').trim().slice(0, 200) || null;
+  const reason = String(rawReason || '').trim().slice(0, 200) || null;
   await db.prepare('UPDATE cars SET archived_at=?, archived_by=?, archive_reason=?, updated_at=? WHERE id=?')
-    .run(now, req.user.id, reason, now, id);
+    .run(now, user.id, reason, now, id);
 
   // طلبات التواصل الجارية عليها تُغلق — لا يتصل زميلٌ على سيارة خرجت من العمل
   await db.prepare(`UPDATE referrals SET status='ملغى', closed_at=?, closed_by=?, close_reason='أُرشفت السيارة'
-    WHERE car_id=? AND status IN ('مُرسَل','مفتوح','وصلت النتيجة')`).run(now, req.user.id, id);
+    WHERE car_id=? AND status IN ('مُرسَل','مفتوح','وصلت النتيجة')`).run(now, user.id, id);
 
-  A.audit(req.user.id, 'أرشفة سيارة', 'cars', id, { plate: car.plate, ...history, السبب: reason || '—' });
-  res.json({ ok: true, archived: true, history });
-});
+  A.audit(user.id, 'أرشفة سيارة', 'cars', id, { plate: car.plate, ...history, السبب: reason || '—' });
+  return { archived: true, history };
+}
 
 // استرجاع سيارة مؤرشفة — تعود كما أُرشفت، بكل ما لها
 router.post('/:id/restore', P.needs('cars.delete'), async (req, res) => {

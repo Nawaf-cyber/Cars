@@ -126,6 +126,8 @@ function publicUser(u) {
     /* رئيسٌ على موظفين: يرى سياراتهم، وسجلّ تعديلاتهم في الإعدادات. ليست
        صلاحيةً تُمنح بل تعيينٌ في القسم — فتُرسل وحدها لا ضمن caps. */
     heads: require('./departments').membersUnder(u).length > 0,
+    // أسماء الأقسام التي يرأسها — ليعرف من يدخل أنه رئيسٌ لا موظفٌ فقط
+    head_of: require('./departments').headedBy(u).map((d) => d.name),
     assignable_roles: P.assignableRoles(u),  // لا تُعرض له أدوار أعلى منه
     extra_ui: u.role === 'owner',            // هل نحمّل واجهة إضافية خاصة بهذا المستخدم
     /* وحداتٌ تُحمَّل من الخادم بأسماء محايدة — فلا يظهر في مصدر الصفحة ما

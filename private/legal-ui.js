@@ -45,7 +45,7 @@
   /* ============================================================
      الحقن: التبويب والقسم وشريط التنبيه
      ============================================================ */
-  document.querySelector('#tabs').insertAdjacentHTML('beforeend', '<button data-tab="legal" data-ui-module>القانون</button>');
+  document.querySelector('#tabs').insertAdjacentHTML('beforeend', '<button data-tab="legal" data-icon="scale" data-ui-module>القانون</button>');
   const main = document.querySelector('main');
   main.insertAdjacentHTML('beforeend', `
     <section id="tab-legal" class="tab-panel hidden" data-ui-module>
